@@ -67,11 +67,17 @@ let url_decode s =
 	Buffer.contents buf
 
 let contains_substring s substr =
-	let re = Str.regexp_string substr in
-	try
-		ignore (Str.search_forward re s 0);
-		true
-	with Not_found -> false
+	let len_s = String.length s in
+	let len_sub = String.length substr in
+	if len_sub = 0 then true
+	else if len_sub > len_s then false
+	else
+		let rec loop i =
+			if i > len_s - len_sub then false
+			else if String.sub s i len_sub = substr then true
+			else loop (i + 1)
+		in
+		loop 0
 
 let has_path_traversal raw_path =
 	let decoded_path = url_decode raw_path in
