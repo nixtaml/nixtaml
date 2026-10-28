@@ -1,0 +1,179 @@
+= Nixtamal: History & Changelog
+:author: Nixtamal Community
+:toc:
+:toclevels: 3
+
+== Project Timeline
+
+=== The Genesis Problem (2024)
+
+Nix was designed for flakes — composable, reproducible inputs with
+cryptographic guarantees. But the ecosystem diverged. Non-flake workflows
+became dominant. Tools that should have been simple became complex.
+
+Meanwhile, teams using esoteric VCS (DARCS, Pijul, Fossil) faced a gap:
+their tools had no native concept of pinning, Merkle-ized hashes, or
+reproducible fetch. Integrating these sources into production Nix pipelines
+required manual, error-prone work.
+
+=== Foundation (2025-12)
+
+Nixtamal was created to bridge this gap:
+
+* **KDL manifest** — human-readable input declarations
+* **Lockfile (JSON)** — reproducible, verifiable source pins
+* **VCS abstraction** — DARCS, Pijul, Fossil, Git in one interface
+* **Merkle-ized hashing** — SHA-256, SHA-512, BLAKE3
+* **Flake integration** — esoteric sources become flake inputs
+
+=== Phase 1: Core Platform (2025-12 — 2026-01)
+
+* Type system: Input, Lockfile, Manifest
+* KDL codec for configuration
+* Concurrent prefetching with Eio (OCaml 5)
+* Git, DARCS, Pijul VCS support
+* Basic CLI: lock, refresh, show
+* Flake support (flake.nix, flake.lock)
+
+=== Phase 2: Production Hardening (2026-02 — 2026-04)
+
+* **Security**: URI validation, scheme whitelist, path traversal detection
+* **Schema versioning**: Upgrade paths with backup/rollback
+* **Fossil VCS**: Complete implementation
+* **Lockfile auto-creation**: Graceful handling of missing files
+* **Test coverage**: bisect_ppx infrastructure, CI pipeline
+* **Cmdliner 2.x**: Modern CLI framework
+
+=== Phase 3: Full Feature Set (2026-10)
+
+* **Blueprint system**: Project scaffolding
+* **Garbage collection**: Input lifecycle management
+* **Patch vendoring**: Offline stability
+* **TUI improvements**: Progress display, fetch status
+* **Mirror support**: TUNA fallback for resilience
+* **Schema 1.5.0**: Extended manifest capabilities
+
+=== Documentation & Community (2026-10)
+
+* Community-focused AsciiDoc documentation
+* nixtamal.tech website preparation
+* Discord community server (upcoming)
+* Professional positioning
+
+== Key Decisions
+
+[cols="1,2,2,1"]
+|===
+| Date | Decision | Rationale | Status
+
+| 2025-12
+| KDL for configuration
+| Human-readable, semantic richness
+| ✅ Validated
+
+| 2025-12
+| JSON for lockfiles
+| Machine-readable, diffable, standard
+| ✅ Validated
+
+| 2025-12
+| OCaml 5 + Eio
+| Type safety, modern concurrency
+| ✅ Validated
+
+| 2026-02
+| Security hardening
+| Production safety requirements
+| ✅ Validated
+
+| 2026-04
+| Flake-first integration
+| Modern Nix standard
+| ✅ Validated
+
+| 2026-10
+| Professional governance
+| nixtamal.tech + Discord
+| 🔄 In progress
+|===
+
+== Changelog
+
+=== 0.3.0 (2026-10-28) — Full Feature Set
+
+* **NEW**: Blueprint system (project scaffolding)
+* **NEW**: Garbage collection support
+* **NEW**: Patch vendoring for offline stability
+* **NEW**: TUI improvements (fetch status, progress)
+* **NEW**: Mirror support (TUNA fallback)
+* **NEW**: Locator architecture (SCP-style, local paths)
+* **NEW**: Foreman module (concurrent orchestration)
+* **NEW**: Jinja2 lock loader template
+* **NEW**: VCS abstraction (Darcs, Pijul, Fossil, Git)
+* **SCHEMA**: Upgraded to 1.5.0
+* **SECURITY**: URI validation preserved
+* **DOCS**: Community AsciiDoc documentation
+
+=== 0.2.0 (2026-04-15) — Production Hardening
+
+* **SECURITY**: URI validation (scheme whitelist, path traversal)
+* **SECURITY**: Validation bypass fixes
+* **TESTING**: bisect_ppx coverage infrastructure
+* **TESTING**: Coverage CI workflow
+* **FEATURE**: Fossil VCS support
+* **FEATURE**: Schema upgrade with backup/rollback
+* **FEATURE**: Lockfile auto-creation
+* **FIX**: Cmdliner 2.x compatibility
+
+=== 0.1.1 (2026-01-05) — Stability
+
+* **SCHEMA**: Lockfile fields required (0.1.1)
+* **FEATURE**: Silo management
+* **FIX**: Lock loader improvements
+
+=== 0.1.0 (2025-12-10) — Foundation
+
+* **NEW**: Core type system (Input, Lockfile, Manifest)
+* **NEW**: KDL codec for configuration
+* **NEW**: Git, DARCS, Pijul VCS support
+* **NEW**: Concurrent prefetching with Eio
+* **NEW**: Basic CLI (lock, refresh, show)
+* **NEW**: Flake support (flake.nix, flake.lock)
+
+== Lessons Learned
+
+=== Technical
+
+* **Type systems catch bugs** — OCaml's strict typing prevented entire
+  classes of errors
+* **Security is not optional** — URI validation, path traversal detection
+* **Schema versioning pays off** — upgrade paths prevent lock-in
+* **Concurrency is hard** — Eio helps, but requires careful design
+
+=== Design
+
+* **Composability beats abstraction** — simple, composable interfaces
+  outperform complex, layered ones
+* **Reproducibility is the product** — pinning, hashing, verification
+* **VCS-native semantics matter** — don't wrap DARCS in a Git-shaped box
+* **KDL was the right choice** — readability without whitespace hell
+
+=== Community
+
+* **Professional governance wins** — clear leadership, transparent roadmap
+* **Documentation is product** — help people ship, not read manifestos
+* **Accessibility drives adoption** — Discord, website, clear guides
+* **Choose your audience** — production teams need different things than
+  hobbyists
+
+== The Future
+
+Nixtamal aims to:
+
+. **Be the standard bridge** for esoteric VCS in production Nix
+. **Deepen flake integration** — native input composition
+. **Expand VCS support** — more esoteric tools, same guarantees
+. **Build the community** — nixtamal.tech, Discord, contributions
+. **Maintain reproducibility** — the contract is non-negotiable
+
+The composable future is here. Let's build it together.

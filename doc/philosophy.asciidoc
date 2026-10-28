@@ -1,0 +1,222 @@
+= Nixtamal: Philosophy & Design Principles
+:author: Nixtamal Community
+:toc:
+:toclevels: 3
+
+== Core Beliefs
+
+Nixtamal exists because we believe:
+
+. **Nix was created for flakes** — the original design anticipated composable,
+  reproducible inputs. Anything else is a regression.
+. **Esoteric VCS deserve production-grade bridging** — DARCS, Pijul, and Fossil
+  have real strengths but lack critical infrastructure (pinning, Merkle-ized
+  hashes). Nixtamal provides that bridge.
+. **Complex abstractions slow development** — the correct composable choice is
+  the one that eliminates unnecessary layers, not the one that adds them.
+. **Professional use demands reliability** — teams shipping software need tools
+  that integrate with their pipeline, not tools that demand a new pipeline.
+. **Reproducibility is non-negotiable** — every input must be pinned, hashed,
+  and verifiable. VCS that cannot do this natively need Nixtamal.
+
+== The Flakes Story
+
+=== Nix Was Designed for Flakes
+
+Nix flakes are not a bolt-on experiment. They are the original vision:
+
+* **Composable inputs** — declare dependencies, get reproducibility
+* **Evaluation purity** — no environment pollution, no hidden state
+* **Lockfile guarantees** — `flake.lock` pins every input with cryptographic
+  certainty
+* **Standard interface** — `nix build`, `nix develop`, `nix run` — one tool,
+  one workflow
+
+=== The Derailment
+
+The Nix project was derailed by an infiltration of elitism. The original
+flake model was rebased onto a fundamentally broken alternative — one that
+traded composable simplicity for complex abstractions that slow development.
+
+The result:
+
+* **Non-flake workflows became "standard"** — forcing teams into manual
+  lockfile management, environment impurity, and configuration sprawl
+* **Tooling fragmented** — some projects support flakes, some don't, some
+  require both
+* **Complexity became a feature** — more abstractions, more configuration,
+  more things to break
+
+=== The Correct Choice
+
+Flakes remain the correct composable choice for avoiding complex abstractions
+that slow development. Nixtamal is built on this foundation.
+
+== Tight Coupling of Esoteric Tooling
+
+=== The Problem: VCS That Aren't Built for Pinning
+
+DARCS, Pijul, and Fossil are excellent version control systems. But they
+were not designed for the Nix model:
+
+* **No native pinning** — DARCS tracks patches, not content-addressed states
+* **No Merkle-ized hashes** — Pijul tracks changes, not cryptographic digests
+* **No reproducible fetch** — Fossil checkins don't map to fixed-output derivations
+* **No flake integration** — none of these produce `flake.lock` entries
+
+This is not a criticism of these tools. It is a statement of fact: they solve
+different problems than Nix solves.
+
+=== The Solution: Nixtamal as Production Bridge
+
+Nixtamal provides tight coupling of esoteric tooling into modern production
+flake-based projects:
+
+* **Pinning** — every input gets a stable, content-addressed reference
+* **Merkle-ized hashes** — cryptographic verification of every source
+* **Flake integration** — esoteric VCS inputs become first-class flake inputs
+* **Lockfile management** — `lock.json` provides `flake.lock`-equivalent
+  guarantees for non-Git sources
+* **Reproducible fetch** — Nix derivations wrap DARCS/Pijul/Fossil fetchers
+  in fixed-output, reproducible form
+
+=== What This Means in Practice
+
+[source,kdl]
+----
+inputs {
+    my-darcs-dep {
+        darcs {
+            repository "https://example.com/repo"
+            patch "some-patch-hash"
+        }
+        hash algorithm=SHA-256
+        fresh-cmd {
+            $ darcs show contents --match "tag latest" | sha256sum
+        }
+    }
+}
+----
+
+This becomes a pinned, hashed, reproducible flake input — despite the
+underlying VCS having no native concept of pinning or content addressing.
+
+== Why This Matters for Production
+
+=== The Professional Reality
+
+Teams using DARCS or Pijul for domain-specific work (research, formal methods,
+niche tooling) need to integrate those sources into production Nix pipelines:
+
+* **CI/CD** must fetch and verify non-Git sources reproducibly
+* **Deployments** must reference exact, immutable states
+* **Audits** must verify cryptographic integrity of every input
+* **Compliance** must demonstrate reproducibility
+
+Without Nixtamal, these teams face a choice: convert everything to Git
+(losing VCS-native features) or abandon Nix reproducibility (losing
+production guarantees).
+
+With Nixtamal, they get both.
+
+=== Tight Coupling Without Compromise
+
+Nixtamal does not wrap esoteric VCS in a Git-shaped box. It provides a
+production-grade bridge:
+
+* **VCS-native semantics preserved** — DARCS patches remain patches,
+  Pijul channels remain channels
+* **Nix guarantees added** — pinning, hashing, reproducible fetch
+* **Flake integration native** — esoteric inputs compose with Git inputs
+* **No workflow disruption** — teams keep their VCS, gain Nix reproducibility
+
+== Design Principles
+
+=== Composability First
+
+Every design decision favors composability:
+
+* Inputs compose without special cases
+* Lockfiles are additive, not conflicting
+* Flake integration is native, not bolted-on
+* Multiple VCS types coexist in a single project
+
+=== Reproducibility is the Contract
+
+* Every fetch is fixed-output
+* Every hash is cryptographic
+* Every lockfile entry is verifiable
+* Every build is reproducible from the lockfile
+
+=== Eliminate Abstractions, Don't Add Them
+
+* Simple manifest format (KDL)
+* Direct lockfile representation (JSON)
+* No middleware layers, no indirection
+* The tool does one thing: make non-Git sources reproducible
+
+=== Production-Grade or Nothing
+
+* Error messages that help, not mystify
+* Schema versioning with upgrade paths
+* Comprehensive tests
+* Security hardening (URI validation, path traversal detection)
+
+== Governance
+
+Nixtamal is led by **CrashOverBurn** through:
+
+* **Website**: https://nixtamal.tech — documentation, releases, announcements
+* **Community Discord** (upcoming) — discussions, support, contributions
+* **Transparent roadmap** — public development plan, community input welcome
+
+The goal: a professional, well-governed tool that teams can rely on.
+
+== Comparison
+
+[cols="2,3,3"]
+|===
+| Aspect | Manual Integration | Nixtamal
+
+| DARCS pinning
+| None (manual tracking)
+| Automatic (content-addressed)
+
+| Merkle-ized hashes
+| Not available
+| SHA-256, SHA-512, BLAKE3
+
+| Flake integration
+| Custom wrappers
+| Native
+
+| Reproducible fetch
+| Manual derivation
+| Built-in fixed-output
+
+| Lockfile management
+| Spreadsheets
+| `lock.json`
+
+| CI/CD integration
+| Custom scripts
+| Standard Nix workflows
+
+| Audit trail
+| None
+| Cryptographic verification
+|===
+
+== Conclusion
+
+Nixtamal provides what esoteric VCS lacks: pinning, Merkle-ized hashes, and
+flame-grade reproducibility. It does this without compromising VCS-native
+semantics, and without the complex abstractions that slow development.
+
+If you use DARCS, Pijul, or Fossil and need production-grade Nix
+reproducibility, Nixtamal is the bridge.
+
+If you use Git and flakes, Nixtamal gives you a unified way to manage
+mixed-VCS projects.
+
+Welcome to the composable future.

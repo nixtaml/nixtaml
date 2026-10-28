@@ -1,0 +1,357 @@
+= HACKING: Development Guide
+:author: Nixtamal Community
+:toc:
+:toclevels: 3
+
+== Development Environment
+
+=== Prerequisites
+
+* Nix (with flakes enabled)
+* Git
+* OCaml 5.x (provided by nix develop)
+
+=== Setup
+
+[source,bash]
+----
+# Recommended: flake-based
+nix develop
+
+# Traditional (if you must)
+nix-shell
+----
+
+=== Build & Test
+
+[source,bash]
+----
+# Build
+dune build
+
+# Run tests
+dune runtest
+
+# Specific test
+dune runtest --filter <test_name>
+
+# Format
+dune build @fmt
+
+# Clean
+dune clean
+----
+
+== Git Workflow
+
+=== Fork → Branch → PR
+
+. Fork the repository on GitHub
+. Clone your fork
+. Create a feature branch
+. Make changes, commit
+. Push, open Pull Request
+
+=== Commit Messages
+
+[source]
+----
+feat: add Merkle hash support for Fossil
+fix: resolve path traversal in locator validation
+docs: update flake integration guide
+test: add lockfile roundtrip tests
+chore: update Eio to 1.6
+----
+
+=== Code Review
+
+* All changes require review
+* CI must pass (tests, coverage, formatting)
+* Documentation for user-facing changes
+
+== Flake Integration
+
+=== Project Structure
+
+[source]
+----
+flake.nix           # Flake definition
+flake.lock          # Locked inputs
+default.nix         # Traditional fallback
+shell.nix           # Traditional dev shell
+release.nix         # Release build
+nix/
+  overlay/          # Nix overlays
+  package/          # Package definitions
+  tamal/            # Nixtamal lockfile
+lib/                # OCaml library
+bin/                # CLI
+test/               # Tests
+----
+
+=== Using Nixtamal in Flake Projects
+
+[source,nix]
+----
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixtamal.url = "github:CrashOverBurn/nixtamal";
+  };
+
+  outputs = { self, nixpkgs, nixtamal }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+    in {
+      packages.${system}.default = nixtamal.packages.${system}.default;
+
+      devShells.${system}.default = pkgs.mkShell {
+        buildInputs = [ nixtamal.packages.${system}.default ];
+      };
+    };
+}
+----
+
+=== Bridging Esoteric VCS into Flake Projects
+
+The core value: DARCS/Pijul/Fossil sources become flake inputs.
+
+[source,kdl]
+----
+# manifest.kdl
+inputs {
+    my-darcs-research {
+        darcs {
+            repository "https://research.example.com/formal-methods"
+            patch "sha256-abc123..."
+        }
+        hash algorithm=SHA-256
+        fresh-cmd {
+            $ darcs log --last 1 --xml-output | grep -o 'hash="[^"]*"'
+        }
+    }
+
+    my-pijul-tool {
+        pijul {
+            repository "https://code.example.com/pijul-tool"
+            channel "main"
+        }
+        hash algorithm=BLAKE3
+    }
+}
+----
+
+[source,bash]
+----
+# Lock these sources with Merkle hashes
+nixtamal lock
+
+# Generates lock.json with content-addressed pins
+# Now they're reproducible flake inputs
+----
+
+=== Hybrid Workflows
+
+* **Flake-native**: `nix build`, `nix develop`, `nix run`
+* **Traditional**: `nix-build`, `nix-shell`
+* **Both**: `flake.nix` + `default.nix` side by side
+
+== Building for Similar Systems
+
+=== Flake Input Pinning Patterns
+
+How to pin non-Git sources in flake projects:
+
+[source,nix]
+----
+# Pattern 1: Direct flake input (Git only)
+inputs.mydep.url = "github:user/repo/v1.0.0";
+
+# Pattern 2: Via Nixtamal (any VCS)
+# Use nixtamal.lock, reference in flake
+inputs.nixtamal.url = "github:CrashOverBurn/nixtamal";
+# Then use nixtamal.lib to consume locked sources
+
+# Pattern 3: Fixed-output derivation
+# Wrap fetcher in mkDerivation with outputHash
+----
+
+=== Git Submodule Alternatives
+
+[cols="2,3"]
+|===
+| Git Submodule | Flake Input + Nixtamal
+
+| `git submodule add <url>`
+| `inputs.<name>.url = "<url>"` or `nixtamal lock`
+
+| Manual version tracking
+| `flake.lock` / `lock.json` automatic
+
+| Nested repository complexity
+| Flat input graph
+
+| Git-only
+| Any VCS (via Nixtamal)
+|===
+
+=== Lockfile Management Across Tools
+
+[cols="2,2,2,2"]
+|===
+| Tool | Lockfile | VCS Support | Merkle Hashes
+
+| Nixtamal
+| `lock.json`
+| Git, DARCS, Pijul, Fossil
+| SHA-256, SHA-512, BLAKE3
+
+| Flakes
+| `flake.lock`
+| Git only
+| SHA-256
+
+| niv
+| `nix/sources.json`
+| Git, tarball
+| SHA-256
+
+| npins
+| `nix/sources.nix`
+| Git, tarball
+| SHA-256
+|===
+
+=== Migration from Other Tools
+
+[source,bash]
+----
+# From manual pinning
+# 1. Create manifest.kdl
+# 2. Run nixtamal lock
+# 3. Verify lock.json hashes
+
+# From flake.lock (Git inputs)
+# 1. Import Git inputs to manifest.kdl
+# 2. Add esoteric VCS inputs
+# 3. Run nixtamal lock
+
+# From niv / npins
+# 1. Convert sources to manifest.kdl
+# 2. Run nixtamal lock
+# 3. Verify reproducibility
+----
+
+== Testing
+
+=== Test Structure
+
+[source]
+----
+test/
+  test_input.ml              # Input types
+  test_lockfile.ml           # Lockfile serialization
+  test_upgrade.ml            # Schema upgrades
+  test_VCS.ml                # VCS integration
+  test_blueprint.ml          # Blueprint scaffolding
+  test_silo.ml               # Silo management
+  test_util.ml               # Utilities
+  test_version.ml            # Version checking
+  test_working_directory.ml  # Working directory
+----
+
+=== Running Tests
+
+[source,bash]
+----
+# All tests
+dune runtest
+
+# With coverage
+BISECT_ENABLE=YES dune runtest --instrument-with bisect_ppx --force
+
+# Coverage report
+bisect-ppx-report summary --coverage-path _build/default/test
+----
+
+=== Writing Tests
+
+[source,ocaml]
+----
+let test_merkle_hash =
+  Alcotest.test_case "Merkle hash verification" `Quick @@ fun () ->
+    let expected = "sha256-abc123..." in
+    let actual = compute_merkle_hash input in
+    Alcotest.(check string) "hash matches" expected actual
+----
+
+== CI/CD
+
+=== GitHub Actions
+
+* `.github/workflows/coverage.yml` — test coverage
+* `.github/workflows/flakehub-publish-rolling.yml` — flake publishing
+
+=== Local CI
+
+[source,bash]
+----
+dune runtest
+dune build @fmt
+BISECT_ENABLE=YES dune runtest --instrument-with bisect_ppx --force
+----
+
+== Code Style
+
+=== OCaml
+
+* Tabs for indentation (`.editorconfig`)
+* OCamlFormat (`dune build @fmt`)
+* SPDX headers required
+* Result over exceptions
+* Exhaustive pattern matching
+
+=== Nix
+
+* Spaces for indentation
+* `nixfmt` for formatting
+* `lib.getExe` for all tools
+* `writeShellApplication` for scripts
+
+=== Documentation
+
+* AsciiDoc for user-facing docs
+* Markdown for agent docs (AGENTS.md)
+* Technical references: `.rst` acceptable (manifest.rst)
+
+== Contributing
+
+=== What We Need
+
+* OCaml developers
+* Test writers
+* Documentation writers
+* Nix packaging experts
+* User feedback
+
+=== Guidelines
+
+. Check existing issues first
+. Discuss large changes
+. Write tests for features
+. Update docs for user-facing changes
+. Follow code style
+. Keep commits focused
+
+=== Community
+
+* **Website**: https://nixtamal.tech
+* **Discord** (upcoming): Community server
+* **Issues**: GitHub Issues
+* **Discussions**: GitHub Discussions
+
+=== Leadership
+
+Project led by **CrashOverBurn**. Governance through nixtamal.tech and
+the community Discord. Transparent roadmap, open contributions.

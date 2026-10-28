@@ -1,0 +1,178 @@
+= Nixtamal: Project Documentation
+:author: Nixtamal Community
+:toc:
+:toclevels: 3
+
+== Overview
+
+Nixtamal is a production-grade bridge that couples esoteric version control
+systems (DARCS, Pijul, Fossil) into modern flake-based Nix projects. It
+provides what these tools lack: pinning, Merkle-ized hashes, and reproducible
+fetch — without compromising VCS-native semantics.
+
+*Website:* https://nixtamal.tech
+*Community:* Discord (upcoming)
+*Leadership:* CrashOverBurn
+
+== Quick Links
+
+* link:philosophy.asciidoc[Philosophy & Design Principles]
+* link:history.asciidoc[History & Changelog]
+* link:HACKING.asciidoc[Development Guide]
+* link:manifest.rst[Manifest Reference (KDL)]
+
+== What Nixtamal Does
+
+=== The Problem
+
+DARCS, Pijul, and Fossil are excellent VCS. But they lack critical
+infrastructure for Nix reproducibility:
+
+* No native pinning (content-addressed states)
+* No Merkle-ized hashes (cryptographic digests)
+* No reproducible fetch (fixed-output derivations)
+* No flake integration (flake.lock entries)
+
+=== The Solution
+
+Nixtamal bridges the gap:
+
+* **Manifest (KDL)** — declare esoteric VCS inputs with human-readable config
+* **Lockfile (JSON)** — content-addressed, Merkle-hashed, verifiable pins
+* **Flake integration** — esoteric inputs compose with Git inputs
+* **Reproducible fetch** — fixed-output derivations for any VCS
+
+=== What This Means
+
+[source,kdl]
+----
+inputs {
+    my-darcs-research {
+        darcs {
+            repository "https://research.example.com/formal-methods"
+            patch "sha256-abc123..."
+        }
+        hash algorithm=SHA-256
+    }
+}
+----
+
+After `nixtamal lock`, this becomes a reproducible flake input — despite
+DARCS having no native concept of pinning or content addressing.
+
+== Key Capabilities
+
+* **Multi-VCS**: Git, DARCS, Pijul, Fossil in one interface
+* **Merkle hashing**: SHA-256, SHA-512, BLAKE3
+* **KDL manifest**: Human-readable, semantically rich configuration
+* **Flake-first**: Native `nix build`, `nix develop`, `nix run` integration
+* **Concurrent prefetch**: Eio-based parallel fetching (OCaml 5)
+* **Schema versioning**: Upgrade paths with backup/rollback
+* **Security hardening**: URI validation, scheme whitelist, path traversal
+  detection
+* **Mirror support**: TUNA fallback for resilience
+* **Blueprints**: Project scaffolding for new inputs
+
+== Installation
+
+=== Flake (Recommended)
+
+[source,bash]
+----
+nix profile install github:CrashOverBurn/nixtamal
+----
+
+=== Traditional Nix
+
+[source,bash]
+----
+nix-build release.nix
+./result/bin/nixtamal --help
+----
+
+== Basic Usage
+
+[source,bash]
+----
+# Initialize a project
+nixtamal set-up
+
+# Lock all inputs with Merkle hashes
+nixtamal lock
+
+# Refresh to latest versions
+nixtamal refresh
+
+# Check for stale inputs
+nixtamal list-stale
+
+# Upgrade schema
+nixtamal upgrade
+----
+
+== Architecture
+
+[cols="2,3"]
+|===
+| Module | Purpose
+
+| `lib/input.ml`
+| Input type definitions (all VCS)
+
+| `lib/manifest.ml`
+| KDL parsing and validation
+
+| `lib/lockfile.ml`
+| Lockfile serialization (JSON)
+
+| `lib/locator.ml`
+| URI/SCP/path handling with security validation
+
+| `lib/foreman.ml`
+| Concurrent orchestration (Eio)
+
+| `lib/vCS.ml`
+| VCS abstraction (Darcs, Pijul, Fossil, Git)
+
+| `lib/prefetch.ml`
+| VCS-specific prefetch implementations
+
+| `lib/schema.ml`
+| Schema versioning and upgrades
+
+| `lib/blueprint.ml`
+| Project scaffolding
+
+| `lib/lock_loader.jinja`
+| Jinja2 template for Nix lock loading
+
+| `bin/cmd.ml`
+| CLI interface
+|===
+
+== Documentation
+
+* link:philosophy.asciidoc[Philosophy] — Why flakes, why esoteric VCS bridging
+* link:history.asciidoc[History] — Timeline and changelog
+* link:HACKING.asciidoc[Development Guide] — Build, test, contribute
+* link:manifest.rst[Manifest Reference] — KDL format specification
+
+== Governance
+
+Nixtamal is led by **CrashOverBurn** through:
+
+* **nixtamal.tech** — documentation, releases, announcements
+* **Community Discord** (upcoming) — discussions, support, contributions
+* **Transparent roadmap** — public development plan
+
+== Contributing
+
+* **Code**: OCaml, Nix, tests
+* **Docs**: AsciiDoc, guides, examples
+* **Community**: Support, feedback, discussion
+
+See link:HACKING.asciidoc[HACKING] for development setup and guidelines.
+
+== License
+
+GPL-3.0-or-later (tools) / LGPL-2.1-or-later (libraries)

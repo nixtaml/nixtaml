@@ -3,12 +3,12 @@
 	┃┃┃┃┗━┓╹┃╹┣┫┃┃┃┣┫┃
 	╹┗┛╹╱ ╹ ╹ ╹╹╹ ╹╹╹┗┛
 ```
-:author: toastal
+:author: Nixtamal Community
 
 == Pronunciation
 /nɪks.təˈmal/ ("nix-tamal")
 
-Maker:: toastal
+Lead:: CrashOverBurn
 Website:: https://nixtamal.tech (launching soon)
 
 Put out:: 2026
@@ -20,10 +20,6 @@ Languages::
 * JSON
 
 Version:: 1.1-alpha (alpha stage)
-
-**Community-maintained fork**: Addressing the original project's lack of reasonable maintenance, this fork prioritizes long-term maintainability, compatibility, and active development.
-
-*Original project:* link:https://darcs.toastal.in.th/nixtamal/trunk/[darcs.toastal.in.th/nixtamal/trunk]
 
 == Purpose
 
@@ -123,7 +119,7 @@ in
 
 === Add a new input to pin
 
-See: link:docs/manifest.rst[]
+See: link:doc/manifest.rst[]
 
 [source,console]
 ----
@@ -166,8 +162,7 @@ After/else
 
 [source,console]
 ----
-$ darcs clone https://darcs.toastal.in.th/nixtamal/trunk/ nixtamal
-$ darcs setpref boringfile .boring
+$ git clone https://github.com/CrashOverBurn/nixtamal.git
 $ cd nixtamal
 ----
 
@@ -306,19 +301,18 @@ For details read LICENSE.txt with full license texts at license/.
 
 == Pitching in
 
-Currently this is best done by sending a patchset to toastal+nixtamal@posteo.net or DM me a remote to clone @ toastal@toastal.in.th.
+Contributions are welcome. Open a Pull Request on GitHub.
 
 Website: https://nixtamal.tech
 
-Community is in an XMPP MUC (chatroom) with future hopes to have an IRC gateway. Join @ xmpp:nixtamal@chat.toastal.in.th?join.
+Community Discord (upcoming): join for discussions, support, and contributions.
 
-Additionally, please read the PITCHING_IN.rst file for other information/expectations.
+See link:HACKING.asciidoc[HACKING] for development setup and guidelines.
 
-== Funding
+== Governance
 
-See choices at the maker’s website https://toast.al/funding/.
+Project led by *CrashOverBurn* through nixtamal.tech and the community Discord. Transparent roadmap, open contributions.
 
-[1] WIP with upstream Nixpkgs
+== License
 
-* Darcs: https://github.com/NixOS/nixpkgs/pull/467172
-* Pijul: https://github.com/NixOS/nixpkgs/pull/467890
+For details read LICENSE.txt with full license texts at license/.
