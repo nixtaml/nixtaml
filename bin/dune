@@ -11,17 +11,16 @@
   fmt.tty
   logs
   logs.cli
-  logs.fmt
-  uri)
- (flags (:standard -alert -deprecated))
+  logs.fmt)
  (preprocess
-  (pps ppx_deriving.show ppx_deriving.eq ppx_deriving.ord ppx_deriving.make)))
+  (pps
+   ppx_deriving.show
+   ppx_deriving.eq
+   ppx_deriving.ord
+   ppx_deriving.enum
+   ppx_deriving.make)))
 
 (env
  (release
   (ocamlopt_flags
-   (:standard
-    -O3
-    -unbox-closures
-    -unboxed-types
-    (-inline-max-depth 8)))))
+   (:standard -O3 -unbox-closures -noassert))))

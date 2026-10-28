@@ -5,6 +5,10 @@
 # Nix
 result*($|/)
 
+# Nixtamal
+(^|/)nix/tamal/\.silo($|/)
+(^|/)nix/tamal/\.check_passed($|/)
+
 # Direnv
 \.envrc$
 (^|/)\.direnv($|/)

@@ -58,6 +58,14 @@ let pp_lerr fmt = function
 	| `Wrong_type_string -> Fmt.pf fmt "Wrong type, expected a string"
 	| `Wrong_type_stringNumber -> Fmt.pf fmt "Wrong type, expected a string number"
 
+(* Absent rather than malformed: the node/prop simply isn’t there.
+	Deliberately excludes [Missing_index] & [Missing_top] — e.g. a bare
+	[submodules] node (arg missing) means [true], while no node means
+	[false]; swallowing the index error would invert that. *)
+let is_missing : lerr -> bool = function
+	| `Not_found _ | `Missing_prop _ -> true
+	| _ -> false
+
 open Kdl
 
 (* note: we can possibly replace option with result for more detailed errors *)

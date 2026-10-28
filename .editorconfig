@@ -11,7 +11,7 @@ insert_final_newline = true
 indent_style = tab
 trim_trailing_whitespace = true
 
-[*.rst]
+[*.{patch,rst}]
 indent_style = unset
 indent_size = unset
 
@@ -19,10 +19,10 @@ indent_size = unset
 indent_style = unset
 indent_size = unset
 
-# Spaces are practically required for Nix C++ as magic strings won’t work
-[*.nix]
+# fish brings a formatter that does 4-space
+[*.fish]
 indent_style = space
-indent_size = 3
+indent_size = 4
 
 [dune]
 indent_style = space
@@ -35,8 +35,3 @@ indent_size = 1
 [dune-workspace]
 indent_style = space
 indent_size = 1
-
-# Dune is generating Opam files so I have no control. Should I skip Dune here?
-[*.opam]
-indent_style = unset
-indent_size = unset

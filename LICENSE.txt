@@ -1,7 +1,8 @@
 Nixtamal is multi-licensed
 
-• All executables produced & associated OCaml bin code are under the terms of
-  GNU General Public License, version 3.0 or later (GPL-3.0-or-later).
+• All executables produced & associated OCaml bin code as well as tests are
+  under the terms of GNU General Public License, version 3.0 or later
+  (GPL-3.0-or-later).
 • All other OCaml library & testing code is under the terms of the GNU Lesser
   General Public License v2.1 or later (LGPL-2.1-or-later) with the OCaml LGPL
   Linking Exception (OCaml-LGPL-linking-exception).

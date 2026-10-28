@@ -1,0 +1,366 @@
+//─────────────────────────────────────────────────────────────────────────────┐
+// SPDX-FileCopyrightText: 2025–2026 toastal <https://toast.al/contact/>       │
+// SPDX-License-Identifier: CC-BY-SA-4.0                                       │
+//─────────────────────────────────────────────────────────────────────────────┘
+document {
+	info {
+		title "Nixtamal Manifest" lang=en
+		description "Schema for inputs to be prefetch & pinned" lang=en
+		author toastal {
+			link "https://toast.al" rel=self
+		}
+		license "Creative Commons Attribution-ShareAlike 4.0 International License" spdx=CC-BY-SA-4.0 {
+			link "https://creativecommons.org/licenses/by-sa/4.0/" lang=en
+		}
+		published "2026-10-14"
+		version "1.5.0"
+	}
+	definitions {
+		value fresh-cmd description="Command to run on refresh to ward off needless prefetching" {
+			max 1
+		}
+		value hash-algorithm description="Hash algorithm" {
+			type string
+			pattern "^(BLAKE3|blake3|SHA-256|sha256|SHA-512|sha512)$"
+			min 1
+			max 1
+		}
+		value fetch-time description="When to fetch the input" {
+			type string
+			pattern "^(build|eval)$"
+			min 1
+			max 1
+		}
+		value gc-value description="GC tracking behavior" {
+			type string
+			pattern "^(track|skip)$"
+			min 1
+			max 1
+		}
+		value semver description="Semver version number" {
+			type string
+			pattern "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+			min 1
+			max 1
+		}
+	}
+	node version description="The version number of this version of the schema" {
+		value ref semver
+		min 1
+		max 1
+	}
+	node default-hash-algorithm description="The default hash algorithm to for a Nix pin" {
+		value ref hash-algorithm
+		max 1
+	}
+	node default-fetch-time description="The default fetch time for inputs" {
+		value ref fetch-time
+		max 1
+	}
+	node default-gc description="The default GC tracking behavior for inputs" {
+		value ref gc-value
+		max 1
+	}
+	node default-vendor-patch description="Vendor remote patches into the repository by default" {
+		value {
+			type boolean
+		}
+		max 1
+	}
+	node inputs description="Input to pin" {
+		min 1
+		max 1
+		children description="A input to pin" {
+			prop name {
+				description "Override the Nix store path name (default: input name + “-src”)"
+				type string
+				pattern "^[+_?=0-9a-zA-Z][-.+_?=0-9a-zA-Z]*$"
+				required #false
+			}
+			prop frozen {
+				type boolean
+				required #false
+			}
+			prop gc {
+				value ref gc-value
+				required #false
+			}
+			children description="Input configuration" {
+				node hash {
+					prop algorithm {
+						value ref hash-algorithm
+					}
+					prop expected {
+						type string
+					}
+				}
+				node fresh-cmd {
+					children {
+						node $ {
+							value {
+								type string
+								max 1
+								min 1
+							}
+						}
+						node | {
+							value {
+								type string
+							}
+						}
+					}
+				}
+				node file {
+					max 1
+					prop fetch-time {
+						value ref fetch-time
+					}
+					children {
+						node url {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node mirror {
+
+						}
+					}
+				}
+				node archive {
+					max 1
+					prop fetch-time {
+						value ref fetch-time
+					}
+					children {
+						node url {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node mirror {
+
+						}
+						node extension {
+							description "Extension hint for pkgs.fetchzip"
+							type string
+							required #false
+						}
+					}
+				}
+				node git {
+					max 1
+					prop fetch-time {
+						value ref fetch-time
+					}
+					children {
+						node repository {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node mirror {
+
+						}
+						node branch {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node tag {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node ref {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node submodules {
+							description "Fetch git submodules"
+							type boolean
+							required #false
+						}
+						node lfs {
+							description "Fetch Git LFS files"
+							type boolean
+							required #false
+						}
+					}
+				}
+				node darcs {
+					max 1
+					children {
+						node repository {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node mirror {
+
+						}
+						node tag {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node context {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+					}
+				}
+				node pijul {
+					max 1
+					children {
+						node remote {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node mirror {
+
+						}
+						node channel {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node state {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node change {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+					}
+				}
+				node fossil {
+					max 1
+					children {
+						node repository {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node branch {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node tag {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+						node check-in {
+							value {
+								type string
+								min 1
+								max 1
+							}
+						}
+					}
+				}
+				node patches {
+					description "Patches to apply to this input"
+					value {
+						type string
+						min 0
+					}
+				}
+			}
+		}
+	}
+	node patches description="Patch definitions to apply to inputs" {
+		min 0
+		max 1
+		prop name {
+			description "Override the Nix store path name (default: input name + “-src”)"
+			type string
+			pattern "^[+_?=0-9a-zA-Z][-.+_?=0-9a-zA-Z]*$"
+			required #false
+		}
+		prop frozen {
+			type boolean
+			required #false
+		}
+		prop vendor {
+			description "Vendor this remote patch into the repository"
+			type boolean
+			required #false
+		}
+		prop gc {
+			value ref gc-value
+			required #false
+		}
+		children description="A patch definition" {
+			node fresh-cmd {
+				children {
+					node $ {
+						value {
+							type string
+							max 1
+							min 1
+						}
+					}
+					node | {
+						value {
+							type string
+						}
+					}
+				}
+			}
+			node hash {
+				prop algorithm {
+					value ref hash-algorithm
+				}
+				prop expected {
+					type string
+				}
+			}
+			value {
+				type string
+				min 1
+				max 1
+			}
+		}
+	}
+}
+

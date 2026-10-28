@@ -1,6 +1,15 @@
 (test
  (name test_main)
- (flags (:standard -alert -deprecated))
- (instrumentation
-  (backend bisect_ppx))
- (libraries nixtamal alcotest qcheck qcheck-alcotest))
+ (libraries nixtamal alcotest qcheck qcheck-alcotest jsont eio eio_main)
+ (modules
+  test_main
+  test_input
+  test_silo
+  test_lockfile
+  test_upgrade
+  test_VCS
+  test_blueprint
+  test_util
+  test_version
+  test_lock_loader
+  test_working_directory))

@@ -5,22 +5,30 @@
   camomile
   eio
   eio_main
+  eio_posix
   jingoo
   jsont
   jsont.bytesrw
   kdl
   logs
-  str
+  logs.fmt
+  ppx_blob
   saturn
-  uri)
- (flags (:standard -alert -deprecated))
- (instrumentation
-  (backend bisect_ppx))
+  stdint
+  xdg)
  (preprocess
   (pps
+   ppx_blob
    ppx_deriving.enum
    ppx_deriving.eq
    ppx_deriving.ord
    ppx_deriving.make
    ppx_deriving.show
-   ppx_deriving_qcheck)))
+   ppx_deriving_qcheck))
+ (preprocessor_deps
+  (file lock_loader.jinja)))
+
+(env
+ (release
+  (ocamlopt_flags
+   (:standard -O3 -unbox-closures -noassert))))

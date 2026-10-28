@@ -5,10 +5,12 @@ _darcs/
 _build/
 *.(a|annot|cma|cmi|cmo|cmx|cmxa|cmxs|o|merlin)
 
+# Nix
 /result
 /result-*
 .direnv
 .envrc
+flake.lock
 
 tmp/
 logs/

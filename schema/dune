@@ -1,0 +1,5 @@
+(install
+ (package nixtamal)
+ (section share)
+ (files
+  (manifest.kdl as schema/manifest.kdl)))

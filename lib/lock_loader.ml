@@ -5,411 +5,107 @@
 (* Loads the lockfile for Nix usage broadly *)
 let filename = "default.nix"
 
-module Features = struct
-	type t = int [@@deriving show]
-
-	let empty = 0
-
-	(* only build features needed *)
-	let file = 1 lsl 0
-	let archive = 1 lsl 1
-	let git = 1 lsl 2
-	let darcs = 1 lsl 3
-	let pijul = 1 lsl 4
-	let nilla = 1 lsl 5
-	let fossil = 1 lsl 6
-
-	let [@inline]has mask v = (mask land v) <> 0
-	let [@inline]add mask v = mask lor v
-	let [@inline]drop mask v = mask land (lnot v)
-
-	let value = ref empty
-
-	let add_input (input : Input.t) : t -> t =
-		match input.kind with
-		| `File _ -> add file
-		| `Archive _ -> add archive
-		| `Git _ -> add git
-		| `Darcs _ -> add darcs
-		| `Pijul _ -> add pijul
-		| `Nilla _ -> add nilla
-		| `Fossil _ -> add fossil
-
-	let drop_input (input : Input.t) : t -> t =
-		match input.kind with
-		| `File _ -> drop file
-		| `Archive _ -> drop archive
-		| `Git _ -> drop git
-		| `Darcs _ -> drop darcs
-		| `Pijul _ -> drop pijul
-		| `Nilla _ -> drop nilla
-		| `Fossil _ -> drop fossil
-end
-
-open Fmt
-
-let pp_banner (ppf : Format.formatter) =
-	let maker = "toastal"
-	and year_range =
-		let first = 2025 in
+let render_jingoo_template ?(version = Lazy.(force Schema.Version.latest)) ?features: features_opt () : string =
+	let year_range (first : int) : string =
 		(* replaced by Nix *)
 		match int_of_string_opt "@release_year@" with
 		| Some last when last > first -> Fmt.str "%a–%a" Fmt.int first Fmt.int last
 		| _ -> Fmt.str "%a" Fmt.int first
-	and margin = Format.pp_get_margin ppf ()
 	in
-	let hr =
-		(*──────────────────────────────*)
-		let uchar = Uchar.of_int 0x2500
-		and buf = Buffer.create (margin * 3)
+	let features =
+		match features_opt with
+		| Some feats -> feats
+		| None ->
+			let feats =
+				Foreman.inputs
+				|> Saturn.Htbl.to_seq
+				|> Seq.fold_left
+						(fun acc (_name, input) ->
+							Features.add_input input acc
+						)
+						Features.empty
+			in
+			let feats =
+				match Saturn.Htbl.to_seq Foreman.patches |> Seq.uncons with
+				| None -> feats
+				| Some _ -> Features.(add Flag.patches feats)
+			in
+			feats
+	in
+	let jg_models2 : (string, Jingoo.Jg_types.tvalue) Hashtbl.t =
+		let open Jingoo.Jg_types in
+		let hash_tokens =
+			let open Input.Hash in
+			let hts = ref [] in
+			for idx =
+			max_algorithm downto min_algorithm do
+				match algorithm_of_enum idx with
+				| Some algo ->
+					let hash_token = string_of_int idx, Tstr (algorithm_to_hash_token algo) in
+					hts := hash_token :: !hts
+				| None -> ()
+			done;
+			Tobj !hts
 		in
-		for _ = 1 to margin do
-			Buffer.add_utf_8_uchar buf uchar
-		done;
-		Buffer.contents buf
+		let local_patches =
+			match Foreman.local_patches () with
+			| [] -> Tnull
+			| patches ->
+				let to_pair (name, path) = (Name.Patch.take name, Tstr path) in
+				Tobj (List.map to_pair patches)
+		in
+		let builtin_fetchers, fetchers =
+			let btbl = Hashtbl.create 3
+			and ftbl = Hashtbl.create 6
+			in
+			if Features.(has Flag.file features) then
+				begin
+					Hashtbl.add btbl "file" (Tint 0);
+					Hashtbl.add ftbl "file" (Tint 0);
+				end;
+			if Features.(has Flag.archive features) then
+				begin
+					Hashtbl.add btbl "archive" (Tint 1);
+					Hashtbl.add ftbl "archive" (Tint 1);
+				end;
+			if Features.(has Flag.git features) then
+				begin
+					Hashtbl.add btbl "git" (Tint 2);
+					Hashtbl.add ftbl "git" (Tint 2);
+				end;
+			if Features.(has Flag.darcs features) then
+				Hashtbl.add ftbl "darcs" (Tint 3);
+			if Features.(has Flag.pijul features) then
+				Hashtbl.add ftbl "pijul" (Tint 4);
+			if Features.(has Flag.fossil features) then
+				Hashtbl.add ftbl "fossil" (Tint 5);
+			Thash btbl, Thash ftbl
+		in
+		let htbl = Hashtbl.create 8 in
+		Hashtbl.add htbl "maker_year_range" (Tstr (year_range 2025));
+		Hashtbl.add htbl "hackmates_year_range" (Tstr (year_range 2026));
+		Hashtbl.add htbl "schema_version" (Tstr (Schema.Version.to_string version));
+		Hashtbl.add htbl "using_patches" (Tbool Features.(has Flag.patches features));
+		Hashtbl.add htbl "hash_tokens" hash_tokens;
+		Hashtbl.add htbl "local_patches" local_patches;
+		Hashtbl.add htbl "builtin_fetchers" builtin_fetchers;
+		Hashtbl.add htbl "fetchers" fetchers;
+		htbl
 	in
-	pf ppf "/*@.";
-	pf ppf "SPDX-FileCopyrightText: %a %a@." Fmt.string year_range Fmt.string maker;
-	pf ppf "SPDX-License-Identifier: ISC@.";
-	pf ppf "@.";
-	pf ppf "@[<hov>Permission@ to@ use,@ copy,@ modify,@ and/or@ distribute@ ";
-	pf ppf "this@ software@ for@ any@ purpose@ with@ or@ without@ fee@ is@ ";
-	pf ppf "hereby@ granted,@ provided@ that@ the@ above@ copyright@ notice@ &@ ";
-	pf ppf "this@ permission@ notice@ appear@ in@ all@ copies.@]@.";
-	pf ppf "@.";
-	pf ppf "@[<hov>THE@ SOFTWARE@ IS@ PROVIDED@ “AS@ IS”@ &@ ISC@ DISCLAIMS@ ";
-	pf ppf "ALL@ WARRANTIES@ WITH@ REGARD@ TO@ THIS@ SOFTWARE@ INCLUDING@ ALL@ ";
-	pf ppf "IMPLIED@ WARRANTIES@ OF@ MERCHANTABILITY@ &@ FITNESS.@ IN@ NO@ ";
-	pf ppf "EVENT@ SHALL@ ISC@ BE@ LIABLE@ FOR@ ANY@ SPECIAL,@ DIRECT,@ ";
-	pf ppf "INDIRECT,@ OR@ CONSEQUENTIAL@ DAMAGES@ OR@ ANY@ DAMAGES@ WHATSOEVER@ ";
-	pf ppf "RESULTING@ FROM@ LOSS@ OF@ USE,@ DATA@ OR@ PROFITS,@ WHETHER@ IN@ ";
-	pf ppf "AN@ ACTION@ OF@ CONTRACT,@ NEGLIGENCE@ OR@ OTHER@ TORTIOUS@ ACTION,@ ";
-	pf ppf "ARISING@ OUT@ OF@ OR@ IN@ CONNECTION@ WITH@ THE@ USE@ OR@ ";
-	pf ppf "PERFORMANCE@ OF@ THIS@ SOFTWARE.@]@.";
-	pf ppf "@.";
-	pf ppf "%a@." Fmt.string hr;
-	pf ppf "┏┓╻+╻ ╱┏┳┓┏┓┏┳┓┏┓╻@.";
-	pf ppf "┃┃┃┃┗━┓╹┃╹┣┫┃┃┃┣┫┃   This file was generated by Nixtamal.@.";
-	pf ppf "╹┗┛╹╱ ╹ ╹ ╹╹╹ ╹╹╹┗┛  Do not edit as it will be overwritten.@.";
-	pf ppf "%a@." Fmt.string hr;
-	pf ppf "*/@."
-
-let pp_nix_named_arg (ppf : Format.formatter) ((name, default): (string * string option)) =
-	pf ppf "%a%a" string name (option (fun ppf v -> pf ppf " ? %s" v)) default
-
-let pp_nix_named_args fmt args =
-	let pp_args = list ~sep: (any ",@;") pp_nix_named_arg in
-	let break = Format.pp_print_custom_break ~fits: ("", 0, "") ~breaks: (",", 0, "") in
-	pf fmt "@[<hv>{@;<0 1>@[@[<hv>%a@]@]%t@]}:" pp_args args break
-
-let pp_cfg (ppf : Format.formatter) =
-	pp_nix_named_args ppf [
-		("system", Some "builtins.currentSystem");
-		("nixpkgs", Some "null");
-		("bootstrap-nixpkgs-lock-name", Some "null");
-	]
-
-(* TODO: consider *not* doing manually as this is ugly AF, but would probably
-	involve building a Nix AST to do properly *)
-let pp_body ~version (ppf : Format.formatter) () =
-	let feats = !Features.value in
-	pf ppf {|let lock = builtins.fromJSON (builtins.readFile ./lock.json); in@.|};
-	pf ppf {|assert (lock.v == "%a");@.|} string version;
-	pf ppf {|let@.|};
-	pf ppf {|	try-fetch = name: fetcher:@.|};
-	pf ppf {|		let@.|};
-	pf ppf {|			try-fetch' = failed-urls: url: urls:@.|};
-	pf ppf {|				let result = builtins.tryEval (fetcher url); in@.|};
-	pf ppf {|				if result.success then@.|};
-	pf ppf {|					result.value@.|};
-	pf ppf {|				else@.|};
-	pf ppf {|					let failed-urls' = [ url ] ++ failed-urls; in@.|};
-	pf ppf {|					if builtins.length urls <= 0 then@.|};
-	pf ppf {|						let fus = builtins.concatStringsSep " " failed-urls'; in@.|};
-	pf ppf {|						throw "Input 「${name}」fetchable @@ [ ${fus} ]"@.|};
-	pf ppf {|					else@.|};
-	pf ppf {|						try-fetch' failed-urls' (builtins.head urls) (builtins.tail urls);@.|};
-	pf ppf {|		in@.|};
-	pf ppf {|		try-fetch' [ ];@.|};
-	pf ppf {|@.|};
-	if Features.has Features.file feats then
-		begin
-			pf ppf {|	builtin-fetch-url = {name, kind, hash}:@.|};
-			pf ppf {|		try-fetch name (url:@.|};
-			pf ppf {|			builtins.fetchurl {@.|};
-			pf ppf {|				inherit url name;@.|};
-			pf ppf {|				${hash.al} = hash.vl;@.|};
-			pf ppf {|			}@.|};
-			pf ppf {|		) kind.ur kind.ms;@.|};
-			pf ppf {|@.|};
-		end;
-	if Features.has Features.archive feats then
-		begin
-			pf ppf {|	builtin-fetch-tarball = {name, kind, hash}:@.|};
-			pf ppf {|		try-fetch name (url:@.|};
-			pf ppf {|			builtins.fetchTarball {@.|};
-			pf ppf {|				inherit url;@.|};
-			pf ppf {|				${hash.al} = hash.vl;@.|};
-			pf ppf {|			}@.|};
-			pf ppf {|		) kind.ur kind.ms;@.|};
-			pf ppf {|@.|}
-		end;
-	if Features.has Features.git feats then
-		begin
-			pf ppf {|	builtin-fetch-git = {name, kind}:@.|};
-			pf ppf {|		try-fetch name (url:@.|};
-			pf ppf {|			builtins.fetchGit {@.|};
-			pf ppf {|				inherit url;@.|};
-			pf ppf {|				rev = kind.lr;@.|};
-			pf ppf {|				submodules = kind.sm;@.|};
-			pf ppf {|				lfs = kind.lf;@.|};
-			pf ppf {|				shallow = true;@.|};
-			pf ppf {|			}@.|};
-			pf ppf {|		) kind.rp kind.ms;@.|};
-			pf ppf {|@.|}
-		end;
-	pf ppf {|	builtin-to-input = name: input:@.|};
-	pf ppf {|		let k = builtins.head input.kd; in@.|};
-	pf ppf {|		|};
-	let builtin_fetch_ifs = Dynarray.create () in
-	if Features.has Features.file feats then
-		Dynarray.add_last builtin_fetch_ifs (
-			Fmt.str "@[<v 1>%a@]" (list ~sep: (any "@.") string) [
-				{|if k == 0 then|};
-				{|			builtin-fetch-url {|};
-				{|				inherit name;|};
-				{|				kind = builtins.elemAt input.kd 1;|};
-				{|				hash = input.ha;|};
-				{|			}|};
-			]
-		);
-	if Features.has Features.archive feats then
-		Dynarray.add_last builtin_fetch_ifs (
-			Fmt.str "@[<v 1>%a@]" (list ~sep: (any "@.") string) [
-				{|if k == 1 then|};
-				{|			builtin-fetch-tarball {|};
-				{|				inherit name;|};
-				{|				kind = builtins.elemAt input.kd 1;|};
-				{|				hash = input.ha;|};
-				{|			}|};
-			]
-		);
-	if Features.has Features.git feats then
-		Dynarray.add_last builtin_fetch_ifs (
-			Fmt.str "@[<v 1>%a@]" (list ~sep: (any "@.") string) [
-				{|if k == 2 then|};
-				{|			builtin-fetch-git {|};
-				{|				inherit name;|};
-				{|				kind = builtins.elemAt input.kd 1;|};
-				{|			}|};
-			]
-		);
-	pf ppf "@[%a@]@." (list ~sep: (any "@.		else ") string) (Dynarray.to_list builtin_fetch_ifs);
-	Dynarray.clear builtin_fetch_ifs;
-	pf ppf {|		else@.|};
-	pf ppf {|			throw "Unsupported input kind “${builtins.toString k}”.";@.|};
-	pf ppf {|@.|};
-	pf ppf {|	nixpkgs' = if builtins.isNull nixpkgs then@.|};
-	pf ppf {|		builtin-to-input "nixpkgs-for-nixtamal" (@.|};
-	pf ppf {|			if builtins.isString bootstrap-nixpkgs-lock-name then@.|};
-	pf ppf {|				lock.i.${bootstrap-nixpkgs-lock-name}@.|};
-	pf ppf {|			else@.|};
-	pf ppf {|				lock.i.nixpkgs-nixtamal or lock.i.nixpkgs@.|};
-	pf ppf {|		)@.|};
-	pf ppf {|	else@.|};
-	pf ppf {|		nixpkgs;@.|};
-	pf ppf {|@.|};
-	pf ppf {|	pkgs = import nixpkgs' {inherit system;};@.|};
-	pf ppf {|@.|};
-	pf ppf {|	inherit (pkgs) lib;@.|};
-	pf ppf {|@.|};
-	if Features.has Features.file feats then
-		begin
-			pf ppf {|	fetch-url = {name, kind, hash}: pkgs.fetchurl {@.|};
-			pf ppf {|		inherit name;@.|};
-			pf ppf {|		url = kind.ur;@.|};
-			pf ppf {|		${hash.al} = hash.vl;@.|};
-			pf ppf {|	} // lib.optionalAttrs (builtins.length kind.ms > 0) { urls = kind.ms; };@.|};
-			pf ppf {|@.|}
-		end;
-	if Features.has Features.archive feats then
-		begin
-			pf ppf {|	fetch-zip = {name, kind, hash}: pkgs.fetchzip {@.|};
-			pf ppf {|		inherit name;@.|};
-			pf ppf {|		url = kind.ur;@.|};
-			pf ppf {|		${hash.al} = hash.vl;@.|};
-			pf ppf {|	} // lib.optionalAttrs (builtins.length kind.ms > 0) { urls = kind.ms; };@.|};
-			pf ppf {|@.|}
-		end;
-	if Features.has Features.git feats then
-		begin
-			pf ppf {|	fetch-git = {name, kind, hash}:@.|};
-			pf ppf {|		let@.|};
-			pf ppf {|			using-mirrors = kind ? ms && (builtins.length kind.ms) > 0;@.|};
-			pf ppf {|			mirror-support = pkgs.fetchgit.__functionArgs ? "mirrors";@.|};
-			pf ppf {|		in@.|};
-			pf ppf {|		lib.warnIf (using-mirrors && !mirror-support)@.|};
-			pf ppf {|			"Upstream pkgs.fetchgit doesn’t yet support mirrors for 「${name}」"@.|};
-			pf ppf {|			pkgs.fetchgit {@.|};
-			pf ppf {|				url = kind.rp;@.|};
-			pf ppf {|				rev = kind.lr;@.|};
-			pf ppf {|				fetchSubmodules = kind.sm;@.|};
-			pf ppf {|				fetchLFS = kind.lf;@.|};
-			pf ppf {|				deepClone = false;@.|};
-			pf ppf {|				${hash.al} = hash.vl;@.|};
-			pf ppf {|			} // lib.optionalAttrs (using-mirror && mirror-support) {@.|};
-			pf ppf {|				mirrors = kind.ms;@.|};
-			pf ppf {|			};@.|};
-			pf ppf {|@.|}
-		end;
-	if Features.has Features.darcs feats then
-		begin
-			pf ppf {|	fetch-darcs = {name, kind, hash}:@.|};
-			pf ppf {|		let@.|};
-			pf ppf {|			using-mirrors = kind ? ms && (builtins.length kind.ms) > 0;@.|};
-			pf ppf {|			mirror-support = pkgs.fetchdarcs.__functionArgs ? "mirrors";@.|};
-			pf ppf {|			reference =@.|};
-			pf ppf {|				let@.|};
-			pf ppf {|					type = builtins.elemAt kind.rf 0;@.|};
-			pf ppf {|					value = builtins.elemAt kind.rf 1;@.|};
-			pf ppf {|				in@.|};
-			pf ppf {|				if type == 0 then@.|};
-			pf ppf {|					let ctx_path = builtins.elemAt value 1; in@.|};
-			pf ppf {|					assert (lib.hasSuffix ".txt" ctx_path);@.|};
-			pf ppf {|					let@.|};
-			pf ppf {|						txt-files = lib.sourceFilesBySuffices ./. [ ".txt" ];@.|};
-			pf ppf {|						dir = lib.fileset.toSource {@.|};
-			pf ppf {|							root = ./.;@.|};
-			pf ppf {|							fileset = lib.fileset.fromSource txt-files;@.|};
-			pf ppf {|						};@.|};
-			pf ppf {|					in@.|};
-			pf ppf {|					{context = "${dir}/${ctx_path}";}@.|};
-			pf ppf {|				else if type == 1 then@.|};
-			pf ppf {|					{rev = value;}@.|};
-			pf ppf {|				else@.|};
-			pf ppf {|					throw "Invalid Darcs reference";@.|};
-			pf ppf {|		in@.|};
-			pf ppf {|		lib.warnIf (using-mirrors && !mirror-support)@.|};
-			pf ppf {|			"Upstream pkgs.fetchdarcs doesn’t yet support mirrors for 「${name}」"@.|};
-			pf ppf {|			pkgs.fetchdarcs ({@.|};
-			pf ppf {|				url = kind.rp;@.|};
-			pf ppf {|				${hash.al} = hash.vl;@.|};
-			pf ppf {|			} // reference // lib.optionalAttrs (using-mirrors && mirror-support){@.|};
-			pf ppf {|				mirrors = kind.ms;@.|};
-			pf ppf {|			});@.|};
-			pf ppf {|@.|}
-		end;
-	if Features.has Features.pijul feats then
-		begin
-			pf ppf {|	fetch-pijul = {name, kind, hash}:@.|};
-			pf ppf {|		let@.|};
-			pf ppf {|			using-mirrors = kind ? ms && (builtins.length kind.ms) > 0;@.|};
-			pf ppf {|			mirror-support = pkgs.fetchpijul.__functionArgs ? "mirrors";@.|};
-			pf ppf {|		in@.|};
-			pf ppf {|		lib.warnIf (using-mirrors && !mirror-support)@.|};
-			pf ppf {|			"Upstream pkgs.fetchpijul doesn’t yet support mirrors for 「${name}」"@.|};
-			pf ppf {|			pkgs.fetchpijul {@.|};
-			pf ppf {|				url = kind.rm;@.|};
-			pf ppf {|				state = kind.ls;@.|};
-			pf ppf {|				${hash.al} = hash.vl;@.|};
-			pf ppf {|			} // lib.optionalAttrs (using-mirrors && mirror-support) {@.|};
-			pf ppf {|				mirrors = kind.ms;@.|};
-			pf ppf {|			};@.|};
-			pf ppf {|@.|}
-		end;
-	pf ppf {|	to-input = name: input:@.|};
-	pf ppf {|		let k = builtins.head input.kd; in@.|};
-	pf ppf {|		|};
-	let pkgs_fetch_ifs = Dynarray.create () in
-	if Features.has Features.file feats then
-		Dynarray.add_last pkgs_fetch_ifs (
-			Fmt.str "@[<v 1>%a@]" (list ~sep: (any "@.") string) [
-				{|if k == 0 then|};
-				{|			fetch-url {|};
-				{|				inherit name;|};
-				{|				kind = builtins.elemAt input.kd 1;|};
-				{|				hash = input.ha;|};
-				{|			}|};
-			]
-		);
-	if Features.has Features.archive feats then
-		Dynarray.add_last pkgs_fetch_ifs (
-			Fmt.str "@[<v 1>%a@]" (list ~sep: (any "@.") string) [
-				{|if k == 1 then|};
-				{|			fetch-zip {|};
-				{|				inherit name;|};
-				{|				kind = builtins.elemAt input.kd 1;|};
-				{|				hash = input.ha;|};
-				{|			}|};
-			]
-		);
-	if Features.has Features.git feats then
-		Dynarray.add_last pkgs_fetch_ifs (
-			Fmt.str "@[<v 1>%a@]" (list ~sep: (any "@.") string) [
-				{|if k == 2 then|};
-				{|			fetch-git {|};
-				{|				inherit name;|};
-				{|				kind = builtins.elemAt input.kd 1;|};
-				{|				hash = input.ha;|};
-				{|			}|};
-			]
-		);
-	if Features.has Features.darcs feats then
-		Dynarray.add_last pkgs_fetch_ifs (
-			Fmt.str "@[<v 1>%a@]" (list ~sep: (any "@.") string) [
-				{|if k == 3 then|};
-				{|			fetch-darcs {|};
-				{|				inherit name;|};
-				{|				kind = builtins.elemAt input.kd 1;|};
-				{|				hash = input.ha;|};
-				{|			}|};
-			]
-		);
-	if Features.has Features.pijul feats then
-		Dynarray.add_last pkgs_fetch_ifs (
-			Fmt.str "@[<v 1>%a@]" (list ~sep: (any "@.") string) [
-				{|if k == 4 then|};
-				{|			fetch-pijul {|};
-				{|				inherit name;|};
-				{|				kind = builtins.elemAt input.kd 1;|};
-				{|				hash = input.ha;|};
-				{|			}|};
-			]
-		);
-	pf ppf "@[%a@]@." (list ~sep: (any "@.		else ") string) (Dynarray.to_list pkgs_fetch_ifs);
-	Dynarray.clear pkgs_fetch_ifs;
-	pf ppf {|		else@.|};
-	pf ppf {|			throw "Unsupported input kind “${builtins.toString k}”.";@.|};
-	pf ppf {|in@.|};
-	pf ppf {|builtins.mapAttrs to-input lock.i@.|}
-
-let pp ~version (ppf : Format.formatter) =
-	set_utf_8 ppf true;
-	let custom_formatter_functions : Format.formatter_out_functions =
-		let sf = Format.pp_get_formatter_out_functions ppf () in
-			{sf with out_indent = fun n -> sf.out_string (String.make n '\t') 0 n}
+	let models needle : Jingoo.Jg_types.tvalue =
+		match Hashtbl.find_opt jg_models2 needle with
+		| Some value -> value
+		| None -> Tnull
+	and jg_tpl : string = [%blob "lock_loader.jinja"]
 	in
-	Format.pp_set_formatter_out_functions ppf custom_formatter_functions;
-	Format.pp_set_margin Format.std_formatter 80;
-	Format.pp_set_formatter_out_functions ppf custom_formatter_functions;
-	pp_banner ppf;
-	pp_cfg ppf;
-	pf ppf "@.@.";
-	pp_body ~version ppf ()
+	Jingoo.Jg_template2.from_string ~models jg_tpl
 
-let write ?(version = "0.1.1") () =
+let write ?(version = Lazy.(force Schema.Version.latest)) () =
+	Logs.info (fun m -> m "Writing lock loader @@ %s …" filename);
 	let working_dir = Working_directory.get () in
 	let filepath = Eio.Path.(working_dir / filename) in
 	let () =
-		Input_foreman.inputs
-		|> Saturn.Htbl.to_seq
-		|> Seq.iter (fun (_name, input) ->
-				let () = Features.value := Features.add_input input !Features.value in ()
-			)
-	in
-	Logs.info (fun m -> m "Writing lock loader @@ %s …" filename);
-	let () =
-		Eio.Path.with_open_out ~create: (`Or_truncate 0o644) filepath @@ fun flow ->
-		Util.Formatter.to_flow (pp ~version) flow
+		Eio.Path.with_open_out ~follow: false ~create: (`Or_truncate 0o644) filepath @@ fun flow ->
+		Eio.Flow.copy_string (render_jingoo_template ~version ()) flow
 	in
 	Logs.info (fun m -> m "Lock loader written.")

@@ -4,6 +4,51 @@
   (run %{bin:nixtamal} --help=groff)))
 
 (rule
+ (with-stdout-to
+  nixtamal-set-up.1
+  (run %{bin:nixtamal} set-up --help=groff)))
+
+(rule
+ (with-stdout-to
+  nixtamal-check-soundness.1
+  (run %{bin:nixtamal} check-soundness --help=groff)))
+
+(rule
+ (with-stdout-to
+  nixtamal-tweak.1
+  (run %{bin:nixtamal} tweak --help=groff)))
+
+(rule
+ (with-stdout-to
+  nixtamal-show.1
+  (run %{bin:nixtamal} show --help=groff)))
+
+(rule
+ (with-stdout-to
+  nixtamal-lock.1
+  (run %{bin:nixtamal} lock --help=groff)))
+
+(rule
+ (with-stdout-to
+  nixtamal-list-stale.1
+  (run %{bin:nixtamal} list-stale --help=groff)))
+
+(rule
+ (with-stdout-to
+  nixtamal-refresh.1
+  (run %{bin:nixtamal} refresh --help=groff)))
+
+(rule
+ (with-stdout-to
+  nixtamal-gc.1
+  (run %{bin:nixtamal} gc --help=groff)))
+
+(rule
+ (with-stdout-to
+  nixtamal-upgrade.1
+  (run %{bin:nixtamal} upgrade --help=groff)))
+
+(rule
  (targets nixtamal-manifest.5)
  (deps manifest.rst)
  (action
@@ -14,4 +59,15 @@
 (install
  (package nixtamal)
  (section man)
- (files nixtamal.1 nixtamal-manifest.5))
+ (files
+  nixtamal.1
+  nixtamal-set-up.1
+  nixtamal-check-soundness.1
+  nixtamal-tweak.1
+  nixtamal-show.1
+  nixtamal-lock.1
+  nixtamal-list-stale.1
+  nixtamal-refresh.1
+  nixtamal-gc.1
+  nixtamal-upgrade.1
+  nixtamal-manifest.5))

@@ -1,1 +1,7 @@
-{"v":"0.1.1","i":{"nixpkgs":{"kd":[1,{"ur":"https://github.com/NixOS/nixpkgs/archive/16c7794d0a28b5a37904d55bcca36003b9109aaa.tar.gz","ms":[]}],"ha":{"al":"sha256","vl":"1931vmgdclk332ikh7psxha1bskvrjwqrqm8a3xwcsr5hc8jfmbw"},"lv":"16c7794d0a28b5a37904d55bcca36003b9109aaa"},"dash-nix":{"kd":[3,{"rp":"https://darcs.toastal.in.th/dash-nix","ms":["https://smeder.ee/~toastal/dash-nix.darcs"],"dt":"2025-12-23T06:16:19Z","rf":[0,[0,"./darcs_context/dash-nix.txt"]],"lw":"4e22a71815c612374821959def64f60f66af0eff"}],"ha":{"al":"sha256","vl":"1kjyskwbchygwjqhpsq8pppfr133l508gi4fzd0pf12hfg46xn9x"},"lv":"4e22a71815c612374821959def64f60f66af0eff"}}}
+{"v":"1.5.0"
+,"i":{
+"nixpkgs":{"sn":"nixpkgs-src","kd":[1,{"ft":0,"ur":"https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1097770.5adc50831c25/nixexprs.tar.zst","ms":[],"ex":null}],"ha":{"al":0,"vl":"sha256-hVMDyAXU0kxRuG3GygbZkzf5x+aBNEC0NYEJ6KwHtD4="},"fv":"https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1097770.5adc50831c25","ps":[]}
+,"dash-nix":{"sn":"dash-nix-src","kd":[3,{"rp":"https://darcs.toastal.in.th/dash-nix","ms":["https://smeder.ee/~toastal/dash-nix.darcs","https://hub.darcs.net/toastal/darcs-nix"],"dt":"2026-10-02T13:13:15Z","rf":[0,[0,"./darcs_context/dash-nix.txt"]],"lw":"929316262b80a95d772a03a8d60ddf00039bb4b1"}],"ha":{"al":0,"vl":"sha256-uPkhNytChR0ithVv+MeEtuEUjnlY44BVNoklr269KpQ="},"fv":"929316262b80a95d772a03a8d60ddf00039bb4b1","ps":[]}
+}
+,"p":{}
+}

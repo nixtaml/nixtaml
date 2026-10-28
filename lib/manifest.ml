@@ -1,8 +1,13 @@
 (*─────────────────────────────────────────────────────────────────────────────┐
-│ SPDX-FileCopyrightText: 2025 toastal <https://toast.al/contact/>             │
+│ SPDX-FileCopyrightText: 2025–2026 toastal <https://toast.al/contact/>        │
 │ SPDX-License-Identifier: LGPL-2.1-or-later WITH OCaml-LGPL-linking-exception │
 └─────────────────────────────────────────────────────────────────────────────*)
-open Name
+type manifest_error = [
+	| `Not_set_up
+	| `Parsing of KDL.Valid.err list
+	| `Version_not_found
+]
+[@@deriving show]
 
 type error = Error.manifest_error
 
@@ -10,8 +15,6 @@ type error = Error.manifest_error
 	hefty refactor since I would possibly need to drop the codec type for
 	Kdl.lens (tho the concepts of “lens” & “codec” are similar) *)
 let filename = "manifest.kdl"
-
-let default_hash_algorithm : Input.Hash.algorithm option ref = ref None
 
 module Template = struct
 	include Input.Template
@@ -27,30 +30,36 @@ module Template = struct
 	let of_mirrors kdl =
 		let open KDL.L in
 		let open KDL.Valid in
-		ll @@
-			match kdl.@(child "mirrors" // args // each string_value) with
-			| Ok ms -> Ok (List.map make ms)
-			| Error (`Not_found ("mirrors", _)) -> Ok []
-			| Error err -> Error err
+		kdl.@(child "mirrors" // args // each string_value)
+		|> ll
+		|> map (List.map make)
+		|> optional ~default: []
 end
 
 module File = struct
 	type t = {
+		fetch_time: Input.Fetch_time.t option;
 		url: Template.t;
 		mirrors: Template.t list;
 	}
 	[@@deriving show, eq, make, qcheck]
 
-	let [@inline]to_manifest ({url; mirrors; _}: Input.File.t) : t =
-		make ~url ~mirrors ()
+	let [@inline]to_manifest ({url; mirrors; fetch_time; _}: Input.File.t) : t =
+		make ~url ~mirrors ?fetch_time ()
 
-	let [@inline]of_manifest ({url; mirrors}: t) : Input.File.t =
-		Input.File.make ~url ~mirrors ()
+	let [@inline]of_manifest ({url; mirrors; fetch_time}: t) : Input.File.t =
+		Input.File.make ~url ~mirrors ?fetch_time ()
 
 	let codec : t KDL.codec = {
 		to_kdl = (fun file ->
 			let open KDL in
-			let nodes =
+			let props =
+				match file.fetch_time with
+				| None ->
+					[]
+				| Some ft ->
+					["fetch-time", arg (`String (Input.Fetch_time.to_string ft))]
+			and nodes =
 				if List.is_empty file.mirrors then
 						[]
 				else
@@ -59,55 +68,88 @@ module File = struct
 			let nodes =
 				node "url" ~args: [Template.to_arg file.url] [] :: nodes
 			in
-				[node "file" nodes]
+				[node "file" ~props nodes]
 		);
 		of_kdl = (fun kdl ->
 			let open KDL.L in
 			let open KDL.Valid in
 			let* file = ll @@ kdl.@(node "file") in
-			let+ url = Template.of_child ~name: "url" file
+			let+ fetch_time =
+				file.@(prop "fetch-time" // string_value)
+				|> ll
+				|> optional_bind ~default: None (fun ftv ->
+						match Input.Fetch_time.of_string ftv with
+						| Some ft -> Ok (Some ft)
+						| None -> Error [`Invalid_fetch_time ftv]
+					)
+			and+ url = Template.of_child ~name: "url" file
 			and+ mirrors = Template.of_mirrors file
 			in
-				{url; mirrors}
+				{fetch_time; url; mirrors}
 		);
 	}
 end
 
 module Archive = struct
 	type t = {
+		fetch_time: Input.Fetch_time.t option;
 		url: Template.t;
 		mirrors: Template.t list;
+		extension: UTF8.t option;
 	}
 	[@@deriving show, eq, make, qcheck]
 
-	let [@inline]to_manifest ({url; mirrors; _}: Input.Archive.t) : t =
-		make ~url ~mirrors ()
+	let [@inline]to_manifest ({fetch_time; url; mirrors; extension; _}: Input.Archive.t) : t =
+		make ?fetch_time ~url ~mirrors ?extension ()
 
-	let [@inline]of_manifest ({url; mirrors}: t) : Input.Archive.t =
-		Input.Archive.make ~url ~mirrors ()
+	let [@inline]of_manifest ({fetch_time; url; mirrors; extension}: t) : Input.Archive.t =
+		Input.Archive.make ?fetch_time ~url ~mirrors ?extension ()
 
 	let codec : t KDL.codec = {
 		to_kdl = (fun archive ->
 			let open KDL in
-			let url =
+			let props =
+				match archive.fetch_time with
+				| None ->
+					[]
+				| Some ft ->
+					["fetch-time", arg (`String (Input.Fetch_time.to_string ft))]
+			and url =
 				node "url" ~args: [Template.to_arg archive.url] [];
 			and nodes =
+				match archive.extension with
+				| None -> []
+				| Some ext -> [node "extension" ~args: [arg (`String ext)] []]
+			in
+			let nodes =
 				if List.is_empty archive.mirrors then
-						[]
+					nodes
 				else
-						[node "mirrors" ~args: (List.map Template.to_arg archive.mirrors) []]
+					node "mirrors" ~args: (List.map Template.to_arg archive.mirrors) [] :: nodes
 			in
 			let nodes = url :: nodes in
-				[node "archive" nodes]
+				[node "archive" ~props nodes]
 		);
 		of_kdl = (fun kdl ->
 			let open KDL.L in
 			let open KDL.Valid in
 			let* archive = ll @@ kdl.@(node "archive") in
-			let+ url = Template.of_child ~name: "url" archive
+			let+ fetch_time =
+				archive.@(prop "fetch-time" // string_value)
+				|> ll
+				|> optional_bind ~default: None (fun ftv ->
+						match Input.Fetch_time.of_string ftv with
+						| Some ft -> Ok (Some ft)
+						| None -> Error [`Invalid_fetch_time ftv]
+					)
+			and+ url = Template.of_child ~name: "url" archive
 			and+ mirrors = Template.of_mirrors archive
+			and+ extension : UTF8.t option =
+				archive.@(child "extension" // arg 0 // string_value)
+				|> ll
+				|> find
 			in
-				{url; mirrors}
+				{fetch_time; url; mirrors; extension}
 		);
 	}
 end
@@ -122,25 +164,33 @@ module Git = struct
 				let open KDL in
 				match ref with
 				| `Branch b -> [KDL.node "branch" ~args: [arg (`String b)] []]
+				| `Tag t -> [KDL.node "tag" ~args: [arg (`String t)] []]
 				| `Ref r -> [KDL.node "ref" ~args: [arg (`String r)] []]
 			);
 			of_kdl = (fun kdl ->
 				let open KDL.L in
 				let open KDL.Valid in
-				let node_names = ["branch"; "ref"]
+				let node_names = ["branch"; "tag"; "ref"]
 				and branch = ll @@ kdl.@(node "branch" // arg 0 // string_value)
+				and tag = ll @@ kdl.@(node "tag" // arg 0 // string_value)
 				and ref = ll @@ kdl.@(node "ref" // arg 0 // string_value)
 				in
-				match branch, ref with
-				| Ok b, Error _ -> Ok (`Branch b)
-				| Error _, Ok r -> Ok (`Ref r)
-				| Error _, Error _ -> Error [`OneRequired node_names]
-				| _, _ -> Error [`OnlyOneOf node_names]
+				match present
+					~absent: (fun _ _ -> true)
+					~named: [
+						"branch", map (fun b -> `Branch b) branch;
+						"tag", map (fun t -> `Tag t) tag;
+						"ref", map (fun r -> `Ref r) ref;
+					] with
+				| One (r, _) -> Ok r
+				| All_absent | Broken _ -> Error [`One_required node_names]
+				| Clash _ -> Error [`Only_one_of node_names]
 			);
 		}
 	end
 
 	type t = {
+		fetch_time: Input.Fetch_time.t option;
 		repository: Template.t;
 		mirrors: Template.t list;
 		reference: Reference.t;
@@ -149,16 +199,28 @@ module Git = struct
 	}
 	[@@deriving show, eq, make, qcheck]
 
-	let [@inline]to_manifest ({repository; mirrors; reference; submodules; lfs; _}: Input.Git.t) : t =
-		make ~repository ~mirrors ~reference ~submodules ~lfs ()
+	let [@inline]to_manifest
+			({fetch_time; repository; mirrors; reference; submodules; lfs; _}: Input.Git.t)
+			: t
+		=
+		make ?fetch_time ~repository ~mirrors ~reference ~submodules ~lfs ()
 
-	let [@inline]of_manifest ({repository; mirrors; reference; submodules; lfs}: t) : Input.Git.t =
-		Input.Git.make ~repository ~mirrors ~reference ~submodules ~lfs ()
+	let [@inline]of_manifest
+			({fetch_time; repository; mirrors; reference; submodules; lfs}: t)
+			: Input.Git.t
+		=
+		Input.Git.make ?fetch_time ~repository ~mirrors ~reference ~submodules ~lfs ()
 
 	let codec : t KDL.codec = {
 		to_kdl = (fun git ->
 			let open KDL in
-			let repository =
+			let props =
+				match git.fetch_time with
+				| None ->
+					[]
+				| Some ft ->
+					["fetch-time", arg (`String (Input.Fetch_time.to_string ft))]
+			and repository =
 				node "repository" ~args: [Template.to_arg git.repository] []
 			and nodes =
 				if git.lfs then [node "lfs" []] else []
@@ -169,6 +231,7 @@ module Git = struct
 			let nodes =
 				match git.reference with
 				| `Branch b -> node "branch" ~args: [arg (`String b)] [] :: nodes
+				| `Tag t -> node "tag" ~args: [arg (`String t)] [] :: nodes
 				| `Ref r -> node "ref" ~args: [arg (`String r)] [] :: nodes
 			in
 			let nodes =
@@ -178,41 +241,47 @@ module Git = struct
 					node "mirrors" ~args: (List.map Template.to_arg git.mirrors) [] :: nodes
 			in
 			let nodes = repository :: nodes in
-				[node "git" nodes]
+				[node "git" ~props nodes]
 		);
 		of_kdl = (fun kdl ->
 			let open KDL.L in
 			let open KDL.Valid in
 			let* git = ll @@ kdl.@(node "git") in
-			let+ repository = Template.of_child ~name: "repository" git
+			let+ fetch_time =
+				git.@(prop "fetch-time" // string_value)
+				|> ll
+				|> optional_bind ~default: None (fun ftv ->
+						match Input.Fetch_time.of_string ftv with
+						| Some ft -> Ok (Some ft)
+						| None -> Error [`Invalid_fetch_time ftv]
+					)
+			and+ repository = Template.of_child ~name: "repository" git
 			and+ mirrors = Template.of_mirrors git
 			and+ reference = Reference.codec.of_kdl git.children
 			and+ submodules =
-				ll @@
-					match git.@(child "submodules") with
-					| Ok sms ->
-						begin
-							match sms.@(arg 0 // bool_value) with
-							| Ok smb -> Ok smb
-							| Error (`Missing_index 0) -> Ok true
-							| Error err -> Error err
-						end
-					| Error (`Not_found ("submodules", _)) -> Ok false
-					| Error err -> Error err
+				match git.@(child "submodules") |> ll |> find with
+				| Ok None -> Ok false
+				| Ok (Some sms) ->
+					ll @@ (
+						match sms.@(arg 0 // bool_value) with
+						| Ok smb -> Ok smb
+						| Error (`Missing_index 0) -> Ok true
+						| Error err -> Error err
+					)
+				| Error errs -> Error errs
 			and+ lfs =
-				ll @@
-					match git.@(child "lfs") with
-					| Ok sms ->
-						begin
-							match sms.@(arg 0 // bool_value) with
-							| Ok smb -> Ok smb
-							| Error (`Missing_index 0) -> Ok true
-							| Error err -> Error err
-						end
-					| Error (`Not_found ("lfs", _)) -> Ok false
-					| Error err -> Error err
+				match git.@(child "lfs") |> ll |> find with
+				| Ok None -> Ok false
+				| Ok (Some sms) ->
+					ll @@ (
+						match sms.@(arg 0 // bool_value) with
+						| Ok smb -> Ok smb
+						| Error (`Missing_index 0) -> Ok true
+						| Error err -> Error err
+					)
+				| Error errs -> Error errs
 			in
-				{repository; mirrors; reference; submodules; lfs}
+				{fetch_time; repository; mirrors; reference; submodules; lfs}
 		);
 	}
 end
@@ -253,11 +322,15 @@ module Darcs = struct
 				and context = ll @@ kdl.@(node "context" // arg 0 // string_value)
 				and tag = ll @@ kdl.@(node "tag" // arg 0 // string_value)
 				in
-				match context, tag with
-				| Ok c, Error _ -> Ok (`Context (`Stated c))
-				| Error _, Ok t -> Ok (`Tag t)
-				| Error _, Error _ -> Ok (`Context (`Assumed None))
-				| _, _ -> Error [`OnlyOneOf node_names]
+				match present
+					~absent: (fun _ _ -> true)
+					~named: [
+						"context", map (fun c -> `Context (`Stated c)) context;
+						"tag", map (fun t -> `Tag t) tag;
+					] with
+				| One (r, _) -> Ok r
+				| All_absent | Broken _ -> Ok (`Context (`Assumed None))
+				| Clash _ -> Error [`Only_one_of node_names]
 			);
 		}
 	end
@@ -326,12 +399,16 @@ module Pijul = struct
 				and state = ll @@ kdl.@(node "state" // arg 0 // string_value)
 				and change = ll @@ kdl.@(node "change" // arg 0 // string_value)
 				in
-				match channel, state, change with
-				| Ok c, Error _, Error _ -> Ok (`Channel c)
-				| Error _, Ok s, Error _ -> Ok (`State s)
-				| Error _, Error _, Ok c -> Ok (`Change c)
-				| Error _, Error _, Error _ -> Error [`OneRequired node_names]
-				| _, _, _ -> Error [`OnlyOneOf node_names]
+				match present
+					~absent: (fun _ _ -> true)
+					~named: [
+						"channel", map (fun c -> `Channel c) channel;
+						"state", map (fun s -> `State s) state;
+						"change", map (fun c -> `Change c) change;
+					] with
+				| One (r, _) -> Ok r
+				| All_absent | Broken _ -> Error [`One_required node_names]
+				| Clash _ -> Error [`Only_one_of node_names]
 			);
 		}
 	end
@@ -379,81 +456,6 @@ module Pijul = struct
 	}
 end
 
-module Nilla = struct
-	module Reference = struct
-		type t = Input.Nilla.Reference.t
-		[@@deriving show, eq, qcheck]
-
-		let codec : t KDL.codec = {
-			to_kdl = (fun ref ->
-				let open KDL in
-				match ref with
-				| `Branch b -> [KDL.node "branch" ~args: [arg (`String b)] []]
-				| `Ref r -> [KDL.node "ref" ~args: [arg (`String r)] []]
-			);
-			of_kdl = (fun kdl ->
-				let open KDL.L in
-				let open KDL.Valid in
-				let node_names = ["branch"; "ref"]
-				and branch = ll @@ kdl.@(node "branch" // arg 0 // string_value)
-				and ref = ll @@ kdl.@(node "ref" // arg 0 // string_value)
-				in
-				match branch, ref with
-				| Ok b, Error _ -> Ok (`Branch b)
-				| Error _, Ok r -> Ok (`Ref r)
-				| Error _, Error _ -> Error [`OneRequired node_names]
-				| _, _ -> Error [`OnlyOneOf node_names]
-			);
-		}
-	end
-
-	type t = {
-		repository: Template.t;
-		mirrors: Template.t list;
-		reference: Reference.t;
-		path: Template.t;
-	}
-	[@@deriving show, eq, make, qcheck]
-
-	let [@inline]to_manifest ({repository; mirrors; reference; path; _}: Input.Nilla.t) : t =
-		make ~repository ~mirrors ~reference ~path ()
-
-	let [@inline]of_manifest ({repository; mirrors; reference; path}: t) : Input.Nilla.t =
-		Input.Nilla.make ~repository ~mirrors ~reference ~path ()
-
-	let codec : t KDL.codec = {
-		to_kdl = (fun nilla ->
-			let open KDL in
-			let repository =
-				node "repository" ~args: [Template.to_arg nilla.repository] []
-			and path =
-				node "path" ~args: [Template.to_arg nilla.path] []
-			and nodes =
-				Reference.codec.to_kdl nilla.reference
-			in
-			let nodes =
-				if List.is_empty nilla.mirrors then
-					nodes
-				else
-					node "mirrors" ~args: (List.map Template.to_arg nilla.mirrors) [] :: nodes
-			in
-			let nodes = path :: repository :: nodes in
-				[node "nilla" nodes]
-		);
-		of_kdl = (fun kdl ->
-			let open KDL.L in
-			let open KDL.Valid in
-			let* nilla = ll @@ kdl.@(node "nilla") in
-			let+ repository = Template.of_child ~name: "repository" nilla
-			and+ mirrors = Template.of_mirrors nilla
-			and+ reference = Reference.codec.of_kdl nilla.children
-			and+ path = Template.of_child ~name: "path" nilla
-			in
-				{repository; mirrors; reference; path}
-		);
-	}
-end
-
 module Fossil = struct
 	module Reference = struct
 		type t = Input.Fossil.Reference.t
@@ -475,12 +477,16 @@ module Fossil = struct
 				and tag = ll @@ kdl.@(node "tag" // arg 0 // string_value)
 				and checkin = ll @@ kdl.@(node "check-in" // arg 0 // string_value)
 				in
-				match branch, tag, checkin with
-				| Ok b, Error _, Error _ -> Ok (`Branch b)
-				| Error _, Ok t, Error _ -> Ok (`Tag t)
-				| Error _, Error _, Ok c -> Ok (`Checkin c)
-				| Error _, Error _, Error _ -> Error [`OneRequired node_names]
-				| _, _, _ -> Error [`OnlyOneOf node_names]
+				match present
+					~absent: (fun _ _ -> true)
+					~named: [
+						"branch", map (fun b -> `Branch b) branch;
+						"tag", map (fun t -> `Tag t) tag;
+						"check-in", map (fun c -> `Checkin c) checkin;
+					] with
+				| One (r, _) -> Ok r
+				| All_absent | Broken _ -> Error [`One_required node_names]
+				| Clash _ -> Error [`Only_one_of node_names]
 			);
 		}
 	end
@@ -527,7 +533,6 @@ module Kind = struct
 		| `Git of Git.t
 		| `Darcs of Darcs.t
 		| `Pijul of Pijul.t
-		| `Nilla of Nilla.t
 		| `Fossil of Fossil.t
 	]
 	[@@deriving show, eq, qcheck]
@@ -538,7 +543,6 @@ module Kind = struct
 		| `Git g -> `Git (Git.to_manifest g)
 		| `Darcs d -> `Darcs (Darcs.to_manifest d)
 		| `Pijul p -> `Pijul (Pijul.to_manifest p)
-		| `Nilla n -> `Nilla (Nilla.to_manifest n)
 		| `Fossil f -> `Fossil (Fossil.to_manifest f)
 
 	let of_manifest : t -> Input.Kind.t = function
@@ -547,7 +551,6 @@ module Kind = struct
 		| `Git g -> `Git (Git.of_manifest g)
 		| `Darcs d -> `Darcs (Darcs.of_manifest d)
 		| `Pijul p -> `Pijul (Pijul.of_manifest p)
-		| `Nilla n -> `Nilla (Nilla.of_manifest n)
 		| `Fossil f -> `Fossil (Fossil.of_manifest f)
 
 	let codec : t KDL.codec = {
@@ -557,43 +560,48 @@ module Kind = struct
 			| `Git g -> Git.codec.to_kdl g
 			| `Darcs d -> Darcs.codec.to_kdl d
 			| `Pijul p -> Pijul.codec.to_kdl p
-			| `Nilla n -> Nilla.codec.to_kdl n
 			| `Fossil f -> Fossil.codec.to_kdl f
 		);
 		of_kdl = (fun kdl ->
-			let kind_names = ["file"; "archive"; "git"; "darcs"; "pijul"; "nilla"; "fossil"] in
-			match File.codec.of_kdl kdl,
-			Archive.codec.of_kdl kdl,
-			Git.codec.of_kdl kdl,
-			Darcs.codec.of_kdl kdl,
-			Pijul.codec.of_kdl kdl,
-			Nilla.codec.of_kdl kdl,
-			Fossil.codec.of_kdl kdl with
-			| Ok file, Error _, Error _, Error _, Error _, Error _, Error _ ->
-				Ok (`File file)
-			| Error _, Ok archive, Error _, Error _, Error _, Error _, Error _ ->
-				Ok (`Archive archive)
-			| Error _, Error _, Ok git, Error _, Error _, Error _, Error _ ->
-				Ok (`Git git)
-			| Error _, Error _, Error _, Ok darcs, Error _, Error _, Error _ ->
-				Ok (`Darcs darcs)
-			| Error _, Error _, Error _, Error _, Ok pijul, Error _, Error _ ->
-				Ok (`Pijul pijul)
-			| Error _, Error _, Error _, Error _, Error _, Ok nilla, Error _ ->
-				Ok (`Nilla nilla)
-			| Error _, Error _, Error _, Error _, Error _, Error _, Ok fossil ->
-				Ok (`Fossil fossil)
-			| Error _, Error _, Error _, Error _, Error _, Error _, Error _ ->
-				Error [`OneRequired kind_names]
-			| _, _, _, _, _, _, _ ->
-				Error [`OnlyOneOf kind_names]
+			let kind_names = ["file"; "archive"; "git"; "darcs"; "pijul"; "fossil"] in
+			let variant_of_name name =
+				List.assoc name [
+					"file", `File;
+					"archive", `Archive;
+					"git", `Git;
+					"darcs", `Darcs;
+					"pijul", `Pijul;
+					"fossil", `Fossil;
+				]
+			in
+			let open KDL.Valid in
+			match present
+				~absent: (fun name errs ->
+					match errs with
+					| [] -> true
+					| [`Not_found (n, _)] -> String.equal name n
+					| _ -> false
+				)
+				~named: [
+					"file", map (fun f -> `File f) @@ File.codec.of_kdl kdl;
+					"archive", map (fun a -> `Archive a) @@ Archive.codec.of_kdl kdl;
+					"git", map (fun g -> `Git g) @@ Git.codec.of_kdl kdl;
+					"darcs", map (fun d -> `Darcs d) @@ Darcs.codec.of_kdl kdl;
+					"pijul", map (fun p -> `Pijul p) @@ Pijul.codec.of_kdl kdl;
+					"fossil", map (fun f -> `Fossil f) @@ Fossil.codec.of_kdl kdl;
+				] with
+			| One (kind, _) -> Ok kind
+			| All_absent -> Error [`One_required kind_names]
+			| Broken [(name, errs)] when errs <> [] ->
+				Error [`Invalid_kind (variant_of_name name, errs)]
+			| Broken _ | Clash _ -> Error [`Only_one_of kind_names]
 		);
 	}
 end
 
 module Hash = struct
 	type t = {
-		algorithm: Input.Hash.algorithm; [@default Input.Hash.default_algorithm]
+		algorithm: Input.Hash.algorithm; [@default !Input.Hash.default_algorithm]
 		expected: UTF8.t option;
 	}
 	[@@deriving show, eq, make, qcheck]
@@ -623,13 +631,12 @@ module Hash = struct
 			let open KDL.L in
 			let open KDL.Valid in
 			let* hash = ll @@ kdl.@(node "hash") in
-			let+ algorithm : Input.Hash.algorithm option =
-				match hash.@(prop "algorithm") with
-				| Ok algo ->
-					begin
-						let* algo_val = ll @@ algo.@(string_value) in
+			let+ algorithm : Input.Hash.algorithm =
+				hash.@(prop "algorithm" // string_value)
+				|> ll
+				|> optional_bind ~default: !Input.Hash.default_algorithm (fun algo_val ->
 						match Input.Hash.algorithm_of_string algo_val with
-						| Some av -> Ok (Some av)
+						| Some av -> Ok av
 						| None ->
 							let len : int = Input.Hash.max_algorithm - Input.Hash.min_algorithm + 1
 							and algo_str (i : int) : UTF8.t =
@@ -646,39 +653,42 @@ module Hash = struct
 									Fmt.(brackets (list ~sep: semi string))
 									algo_str_list
 							);
-							Error [`OneRequired algo_str_list]
-					end
-				| Error (`Missing_prop "algorithm") -> ll @@ Ok !default_hash_algorithm
-				| Error err -> ll @@ Error err
-
+							Error [`One_required algo_str_list]
+					)
 			and+ expected : UTF8.t option =
-				ll @@
-					match hash.@(prop "expected") with
-					| Ok exp -> map Option.some @@ exp.@(string_value)
-					| Error (`Missing_prop "expected") -> Ok None
-					| Error err -> Error err
+				hash.@(prop "expected" // string_value)
+				|> ll
+				|> find
 			in
-			make ?algorithm ?expected ()
+			make ~algorithm ?expected ()
 		);
 	}
+
+	let of_input : Input.Hash.t -> t = fun {Input.Hash.algorithm; expected; _} ->
+		make ~algorithm ?expected ()
+
+	let to_input : t -> Input.Hash.t = fun {algorithm; expected} ->
+		Input.Hash.make ~algorithm ?expected ()
+
+	let default : t = make ()
 end
 
-module Latest_cmd = struct
-	type t = Input.Latest.Cmd.t option
+module Fresh_cmd = struct
+	type t = Input.Fresh.Cmd.t option
 	[@@deriving show, eq, qcheck]
 
-	let [@inline]to_manifest (latest : Input.Latest.t) : t =
+	let [@inline]to_manifest (latest : Input.Fresh.t) : t =
 		latest.cmd
 
-	let [@inline]of_manifest (cmd : t) : Input.Latest.t =
-		Input.Latest.make ?cmd ()
+	let [@inline]of_manifest (cmd : t) : Input.Fresh.t =
+		Input.Fresh.make ?cmd ()
 
 	let codec : t KDL.codec = {
 		to_kdl = (function
 			| None -> []
 			| Some (exec, pipes) ->
 				let open KDL in
-				let cmd_args ({prog; args}: Input.Latest.Cmd.cmd) =
+				let cmd_args ({prog; args}: Input.Fresh.Cmd.cmd) =
 					List.map (Template.to_arg) (prog :: args)
 				in
 				let nodes =
@@ -687,84 +697,256 @@ module Latest_cmd = struct
 				let nodes =
 					node "$" ~args: (cmd_args exec) [] :: nodes
 				in
-					[node "latest-cmd" nodes]
+					[node "fresh-cmd" nodes]
 		);
 		of_kdl = (fun kdl ->
 			let open KDL.L in
 			let open KDL.Valid in
-			let extract_cmd (node : KDL.node) : Input.Latest.Cmd.cmd KDL.Valid.t =
+			let extract_cmd (node : KDL.node) : Input.Fresh.Cmd.cmd KDL.Valid.t =
 				if List.is_empty node.props then
 					match Util.Non_empty_list.of_list node.args with
 					| Some (arg_prog, arg_args) ->
 						begin
 							match arg_prog.@(string_value), arg_args.@(each string_value) with
-							| Error _err, _ -> Error [`InvalidLatestCmd "Bad program specified for command"]
-							| _, Error _err -> Error [`InvalidLatestCmd "Bad arguments specified for command"]
+							| Error _err, _ -> Error [`Invalid_fresh_cmd "Bad program specified for command"]
+							| _, Error _err -> Error [`Invalid_fresh_cmd "Bad arguments specified for command"]
 							| Ok prog, Ok args ->
 								Ok {
 									prog = Template.make prog;
 									args = List.map Template.make args;
 								}
 						end
-					| None -> Error [`InvalidLatestCmd "Empty command"]
+					| None -> Error [`Invalid_fresh_cmd "Empty command"]
 				else
-					Error [`InvalidLatestCmd "Props aren’t supported (yet?); you probably meant to add straight quotation marks (for example “\"--foo=bar\"”)."]
+					Error [`Invalid_fresh_cmd "Props aren’t supported (yet?); you probably meant to add straight quotation marks (for example “\"--foo=bar\"”)."]
 			in
-			let rec extract_all_cmds acc = function
-				| [] -> acc
-				| cmd_list :: cmds_list ->
-					let acc' =
-						match acc, extract_cmd cmd_list with
-						| Error errs, Ok _ -> Error errs
-						| Ok _, Error errs -> Error errs
-						| Ok ok_acc, Ok cmd -> Ok (ok_acc @ [cmd])
-						| Error errs, Error errs' -> Error (errs @ errs')
-					in
-					extract_all_cmds acc' cmds_list
-			in
-			match ll @@ kdl.@(node "latest-cmd") with
-			| Error [`Not_found ("latest-cmd", _)] -> Ok None
-			| Error err -> Error err
-			| Ok latest_cmd ->
-				let+ exec : Input.Latest.Cmd.cmd =
-					let* exec' = ll @@ latest_cmd.@(child ~nth: 0 "$") in
+			match kdl.@(node "fresh-cmd") |> ll |> find with
+			| Ok None -> Ok None
+			| Ok (Some fresh_cmd) ->
+				let+ exec : Input.Fresh.Cmd.cmd =
+					let* exec' = ll @@ fresh_cmd.@(child ~nth: 0 "$") in
 					extract_cmd exec'
-				and+ pipes : Input.Latest.Cmd.cmd list =
-					match ll @@ latest_cmd.@(child_many "|") with
-					| Ok ps -> extract_all_cmds (Ok []) ps
-					| Error [`Not_found ("|", _)] -> Ok []
-					| Error err -> Error err
+				and+ pipes : Input.Fresh.Cmd.cmd list =
+					let* ps = fresh_cmd.@(child_many "|") |> ll |> optional ~default: [] in
+					all (List.map extract_cmd ps)
 				in
-				let cmd : Input.Latest.Cmd.t = (exec, pipes) in
+				let cmd : Input.Fresh.Cmd.t = (exec, pipes) in
 				Some cmd
+			| Error errs -> Error errs
+		);
+	}
+end
+
+module Patch = struct
+	module Source = struct
+		type remote = {
+			url: Template.t;
+			fresh_cmd: Fresh_cmd.t;
+			hash: Hash.t;
+			frozen: bool; [@default false]
+			gc: Input.GC.t option;
+			store_name: Name.Store.t option;
+			vendored: bool; [@default false]
+		}
+		[@@deriving show, eq, qcheck]
+
+		let default_vendored = ref false
+
+		type t =
+			| Local of string
+			| Remote of remote
+		[@@deriving show, eq, qcheck]
+
+		let gen : t QCheck.Gen.t =
+			let open QCheck.Gen in
+			let a_to_z = char_range 'a' 'z' in
+			oneof_weighted [
+				1, map (fun s -> Local ("./" ^ s)) (string_size ~gen: a_to_z (int_bound 20));
+				3, map (fun rem -> Remote rem) gen_remote;
+			]
+	end
+
+	type t = {
+		name: Name.Patch.t;
+		source: Source.t;
+	}
+	[@@deriving show, make, eq, qcheck]
+
+	let [@inline]to_manifest (patch : Input.Patch.t) : t =
+		let source =
+			match patch.source with
+			| Input.Patch.Source.Local path ->
+				Source.Local path
+			| Input.Patch.Source.Remote remote ->
+				Source.Remote {
+					url = remote.url;
+					fresh_cmd = Fresh_cmd.to_manifest remote.fresh;
+					hash = Hash.to_manifest remote.hash;
+					frozen = remote.frozen;
+					gc = remote.gc;
+					store_name = remote.store_name;
+					vendored = remote.vendored;
+				}
+		in
+			{name = patch.name; source}
+
+	let [@inline]of_manifest (mnfst : t) : Input.Patch.t =
+		let source =
+			match mnfst.source with
+			| Source.Local path ->
+				Input.Patch.Source.Local path
+			| Source.Remote remote ->
+				let fresh = Fresh_cmd.of_manifest remote.fresh_cmd in
+				let hash = Hash.of_manifest remote.hash in
+				let rem =
+					Input.Patch.Source.make_remote
+						~url: remote.url
+						~fresh
+						~hash
+						~frozen: remote.frozen
+						?gc: remote.gc
+						?store_name: remote.store_name
+						~vendored: remote.vendored
+						()
+				in
+				Input.Patch.Source.Remote rem
+		in
+		Input.Patch.make ~name: mnfst.name ~source
+
+	let codec : t KDL.node_codec = {
+		to_node = (fun patch ->
+			let open KDL in
+			let name = Name.Patch.take patch.name in
+			match patch.source with
+			| Source.Local path ->
+				node name ~args: [arg (`String path)] []
+			| Source.Remote remote ->
+				let hash = Hash.codec.to_kdl remote.hash
+				and fresh_cmd = Fresh_cmd.codec.to_kdl remote.fresh_cmd
+				in
+				let nodes = hash @ fresh_cmd
+				and args = [Template.to_arg remote.url]
+				and props =
+					if remote.frozen then
+							[("frozen", arg (`Bool true))]
+					else
+							[]
+				in
+				let props =
+					match remote.gc with
+					| Some gc -> ("gc", arg (`String (Input.GC.to_string gc))) :: props
+					| None -> props
+				in
+				let props =
+					match remote.store_name with
+					| None -> props
+					| Some sn -> ("name", arg (`String (Name.Store.take sn))) :: props
+				in
+				let props =
+					if remote.vendored then ("vendor", arg (`Bool true)) :: props else props
+				in
+				node name ~args ~props nodes
+		);
+		of_node = (fun patch ->
+			let open KDL.L in
+			let open KDL.Valid in
+			let* name, source =
+				let+ name' =
+					ll @@ patch.@(node_name)
+				and+ source' =
+					ll @@ patch.@(arg 0 // string_value)
+				in
+					(Name.Patch.make name', source')
+			in
+			let warn_if_vendor () =
+				match patch.@(prop "vendor" // bool_value) with
+				| Ok true ->
+					Logs.warn (fun m ->
+						m "Patch %a is local, so vendoring does not apply; ignoring `vendor`" Name.Patch.pp name
+					)
+				| Ok false | Error _ -> ()
+			in
+			if String.starts_with ~prefix: "./" source || String.starts_with ~prefix: "../" source then
+				(
+					warn_if_vendor ();
+					Ok {
+						name;
+						source = Source.Local source
+					}
+				)
+			else if String.starts_with ~prefix: "file:./" source || String.starts_with ~prefix: "file:../" source then
+				(
+					warn_if_vendor ();
+					Ok {
+						name;
+						source = Source.Local (String.sub source 5 (String.length source - 5))
+					}
+				)
+			else
+				let+ fresh_cmd =
+					Fresh_cmd.codec.of_kdl patch.children
+				and+ hash =
+					Hash.codec.of_kdl patch.children |> optional ~default: (Hash.make ())
+				and+ frozen =
+					patch.@(prop "frozen" // bool_value) |> ll |> optional ~default: false
+				and+ gc =
+					patch.@(prop "gc" // string_value)
+					|> ll
+					|> optional_bind ~default: None (fun str_val ->
+							match Input.GC.of_string str_val with
+							| Some gc -> Ok (Some gc)
+							| None -> Error [`Invalid_GC str_val]
+						)
+				and+ store_name =
+					patch.@(prop "name" // string_value)
+					|> ll
+					|> map Name.Store.make
+					|> find
+				and+ vendored =
+					patch.@(prop "vendor" // bool_value) |> ll |> optional ~default: !Source.default_vendored
+				in
+				{
+					name;
+					source = Source.Remote {url = Template.make source; fresh_cmd; hash; frozen; gc; store_name; vendored}
+				}
 		);
 	}
 end
 
 module Input' = struct
 	type t = {
-		name: Name.t;
+		name: Name.Input.t;
+		store_name: Name.Store.t option;
 		kind: Kind.t;
-		latest_cmd: Latest_cmd.t;
+		fresh_cmd: Fresh_cmd.t;
 		hash: Hash.t;
 		frozen: bool; [@default false]
+		gc: Input.GC.t option;
+		patches: Name.Patch.t list;
 	}
 	[@@deriving show, eq, make, qcheck]
 
 	let [@inline]to_manifest (input : Input.t) : t = {
 		name = input.name;
+		store_name = input.store_name;
 		kind = Kind.to_manifest input.kind;
-		latest_cmd = Latest_cmd.to_manifest input.latest;
+		fresh_cmd = Fresh_cmd.to_manifest input.fresh;
 		hash = Hash.to_manifest input.hash;
 		frozen = input.frozen;
+		gc = input.gc;
+		patches = input.patches;
 	}
 
 	let [@inline]of_manifest (mnfst : t) : Input.t = {
 		name = mnfst.name;
+		store_name = mnfst.store_name;
+		fetch_status = Fetch_status.default;
 		kind = Kind.of_manifest mnfst.kind;
-		latest = Latest_cmd.of_manifest mnfst.latest_cmd;
+		fresh = Fresh_cmd.of_manifest mnfst.fresh_cmd;
 		hash = Hash.of_manifest mnfst.hash;
 		frozen = mnfst.frozen;
+		gc = mnfst.gc;
+		patches = mnfst.patches;
 	}
 
 	let codec : t KDL.node_codec = {
@@ -775,87 +957,179 @@ module Input' = struct
 						[("frozen", arg (`Bool true))]
 				else
 						[]
-			and kind = Kind.codec.to_kdl input.kind
-			and hash = Hash.codec.to_kdl input.hash
-			and latest_cmd = Latest_cmd.codec.to_kdl input.latest_cmd
 			in
-			let nodes = kind @ hash @ latest_cmd in
-			node (Name.take input.name) ~props nodes
+			let props =
+				match input.gc with
+				| Some gc -> ("gc", arg (`String (Input.GC.to_string gc))) :: props
+				| None -> props
+			in
+			let props =
+				match input.store_name with
+				| None -> props
+				| Some sn -> ("name", arg (`String (Name.Store.take sn))) :: props
+			in
+			let kind = Kind.codec.to_kdl input.kind
+			and hash = Hash.codec.to_kdl input.hash
+			and fresh_cmd = Fresh_cmd.codec.to_kdl input.fresh_cmd
+			and patches =
+				if List.is_empty input.patches then
+						[]
+				else
+						[node "patches" ~args: (List.map (fun p -> arg (`String (Name.Patch.take p))) input.patches) []]
+			in
+			let nodes = kind @ hash @ fresh_cmd @ patches in
+			node (Name.Input.take input.name) ~props nodes
 		);
 		of_node = (fun input ->
 			let open KDL.L in
 			let open KDL.Valid in
-			let+ name =
-				ll @@ input.@(node_name)
-				|> Result.map Name.make
-			and+ latest_cmd =
-				Latest_cmd.codec.of_kdl input.children
-			and+ hash =
-				match Hash.codec.of_kdl input.children with
-				| Ok h ->
-					Ok h
-				| Error [`Not_found ("hash", _)] ->
-					Ok (Hash.make ?algorithm: !default_hash_algorithm ())
-				| Error errs ->
-					Error errs
-			and+ kind =
-				Kind.codec.of_kdl input.children
-			and+ frozen =
-				ll @@
-					match input.@(prop "frozen") with
-					| Ok f -> f.@(bool_value)
-					| Error`Missing_prop "frozen" -> Ok false
-					| Error err -> Error err
+			let* input' =
+				let+ name =
+					ll @@ input.@(node_name)
+					|> Result.map Name.Input.make
+				and+ fresh_cmd =
+					Fresh_cmd.codec.of_kdl input.children
+				and+ hash =
+					Hash.codec.of_kdl input.children |> optional ~default: (Hash.make ())
+				and+ kind =
+					Kind.codec.of_kdl input.children
+				and+ frozen =
+					input.@(prop "frozen" // bool_value) |> ll |> optional ~default: false
+				and+ gc =
+					input.@(prop "gc" // string_value)
+					|> ll
+					|> optional_bind ~default: None (fun str_val ->
+							match Input.GC.of_string str_val with
+							| Some gc -> Ok (Some gc)
+							| None -> Error [`Invalid_GC str_val]
+						)
+				and+ patches =
+					input.@(child "patches" // args // each string_value)
+					|> ll
+					|> map (List.map Name.Patch.make)
+					|> optional ~default: []
+				and+ store_name =
+					input.@(prop "name" // string_value)
+					|> ll
+					|> map Name.Store.make
+					|> find
+				in
+					{name; store_name; kind; fresh_cmd; hash; frozen; gc; patches}
 			in
-				{name; kind; latest_cmd; hash; frozen}
+			(* validate features at odds with eval fetching; state if needed *)
+			if List.is_empty input'.patches then
+				(* no patches, no worries *)
+				Ok input'
+			else
+				match input'.kind with
+				| `File {fetch_time; _}
+				| `Archive {fetch_time; _}
+				| `Git {fetch_time; _} when fetch_time = Some Input.Fetch_time.Eval ->
+					Error [`Eval_fetch_time_at_odds_with `Patches]
+				| _ ->
+					Ok input'
 		);
 	}
 end
 
 type t = {
-	version: UTF8.t;
+	version: Schema.Version.t; [@default Lazy.(force Schema.Version.latest)]
+	default_hash_algorithm: Input.Hash.algorithm option;
+	default_fetch_time: Input.Fetch_time.t option;
+	default_gc: Input.GC.t option;
+	default_vendor_patch: bool;
 	inputs: Input'.t list;
+	patches: Patch.t list;
 }
-[@@deriving show, eq, make, qcheck]
+[@@deriving show, eq, make]
+
+let is_document_latest_version (doc : KDL.t) : bool =
+	let open KDL.L in
+	match doc.@(node "version" // arg 0 // string_value) with
+	| Error _ -> false
+	| Ok version_str ->
+		match Schema.Version.of_string version_str with
+		| Some v -> v = Lazy.(force Schema.Version.latest)
+		| None -> false
 
 let document_to_t (doc : KDL.t) : t KDL.Valid.t =
 	let open KDL.L in
 	let open KDL.Valid in
 	let* manifest_default_hash_algorithm : Input.Hash.algorithm option =
-		match ll @@ doc.@(node "default_hash_algorithm" // arg 0 // string_value) with
-		| Ok dha ->
-			begin
+		doc.@(node "default-hash-algorithm" // arg 0 // string_value)
+		|> ll
+		|> optional_bind ~default: None (fun dha ->
 				match Input.Hash.algorithm_of_string dha with
 				| Some ha -> Ok (Some ha)
-				| None -> Error [`InvalidHashAlgorithm dha]
-			end
-		| Error (`Not_found ("default_hash_algorithm", _) :: []) ->
-			Ok None
+				| None -> Error [`Invalid_hash_algorithm dha]
+			)
+	in
+	let* manifest_default_fetch_time : Input.Fetch_time.t option =
+		doc.@(node "default-fetch-time" // arg 0 // string_value)
+		|> ll
+		|> optional_bind ~default: None (fun dft ->
+				match Input.Fetch_time.of_string dft with
+				| Some ft -> Ok (Some ft)
+				| None -> Error [`Invalid_fetch_time dft]
+			)
+	in
+	let* manifest_default_gc : Input.GC.t option =
+		doc.@(node "default-gc" // arg 0 // string_value)
+		|> ll
+		|> optional_bind ~default: None (fun str ->
+				match Input.GC.of_string str with
+				| Some gc -> Ok (Some gc)
+				| None -> Error [`Invalid_GC str]
+			)
+	in
+	let* manifest_default_vendor_patch : bool =
+		doc.@(node "default-vendor-patch" // arg 0 // bool_value)
+		|> ll
+		|> optional ~default: false
+	in
+	(* IMPURE: setting default values *)
+	Option.iter (fun dha -> Input.Hash.default_algorithm := dha) manifest_default_hash_algorithm;
+	Option.iter (fun dft -> Input.Fetch_time.default := dft) manifest_default_fetch_time;
+	Option.iter (fun dgc -> Input.GC.default := dgc) manifest_default_gc;
+	Patch.Source.default_vendored := manifest_default_vendor_patch;
+	(* /IMPURE *)
+	let* version : Schema.Version.t =
+		let* version_str = ll @@ doc.@(node "version" // arg 0 // string_value) in
+		required ~none: (`Invalid_version version_str) (Schema.Version.of_string version_str)
+	in
+	let patches : Patch.t list =
+		match doc.@(node "patches" // children) |> ll |> optional ~default: [] with
+		| Ok patch_nodes ->
+			List.filter_map
+				(fun (patch_node : KDL.node) ->
+					match Patch.codec.of_node patch_node with
+					| Ok patch -> Some patch
+					| Error errs ->
+						Logs.warn (fun m ->
+							m "Failed to parse patch %s: %a" patch_node.name (Fmt.list KDL.Valid.pp_err) errs
+						);
+						None
+				)
+				patch_nodes
 		| Error errs ->
-			Error errs
+			Logs.warn (fun m ->
+				m "Error parsing patches section: %a" (Fmt.list KDL.Valid.pp_err) errs
+			);
+			[]
 	in
-	let () = default_hash_algorithm := manifest_default_hash_algorithm in
-	let+ version : UTF8.t =
-		ll @@ doc.@(node "version" // arg 0 // string_value)
-	and+ inputs : Input'.t list =
-		(* TODO: a lens would mean this could use `each` *)
-		let rec get_inputs acc = function
-			| [] -> acc
-			| (input : KDL.node) :: inputs_tail ->
-				let acc' =
-					match acc, Input'.codec.of_node input with
-					| Error errs, Ok _ -> Error errs
-					| Ok _, Error errs -> Error errs
-					| Ok ok_acc, Ok src -> Ok (ok_acc @ [src])
-					| Error errs, Error errs' -> Error (errs @ errs')
-				in
-				get_inputs acc' inputs_tail
-		in
-		Result.bind
-			(ll @@ doc.@(node "inputs" // children))
-			(get_inputs (Ok []))
+	let* inputs : Input'.t list =
+		let* nodes = doc.@(node "inputs" // children) |> ll in
+		all (List.map Input'.codec.of_node nodes)
 	in
-	make ~version ~inputs ()
+	Ok {
+		version;
+		default_hash_algorithm = manifest_default_hash_algorithm;
+		default_fetch_time = manifest_default_fetch_time;
+		default_gc = manifest_default_gc;
+		default_vendor_patch = manifest_default_vendor_patch;
+		patches;
+		inputs;
+	}
 
 let manifest : KDL.t option ref = ref None
 
@@ -865,30 +1139,121 @@ let exists () : bool =
 	Eio.Path.is_file filepath
 
 let read () =
+	let (let*) = Result.bind in
 	let working_dir = Working_directory.get () in
 	let filepath = Eio.Path.(working_dir / filename) in
 	Logs.info (fun m -> m "Reading manifest @@ %a …" Eio.Path.pp filepath);
-	match Eio.Path.with_open_in filepath KDL.of_flow with
-	| Error (`ParseError msg) -> Error (`Parsing [`ParseError msg])
-	| Ok kdl ->
-		let () = manifest := Some kdl in
-		Ok kdl
+	let* kdl =
+		Eio.Path.with_open_in ~follow: false filepath @@ fun flow ->
+		KDL.of_flow flow
+	in
+	let () = manifest := Some kdl in
+	Ok kdl
 
-let make ?(version = "0.1.1") () =
-	Logs.app (fun m -> m "Making manifest file @@ version:%s" version);
+let make
+		?(version = Lazy.(force Schema.Version.latest))
+		?default_hash_algorithm
+		?default_fetch_time
+		?default_gc
+		?(patches = [])
+		()
+		: unit
+	=
+	Logs.app (fun m -> m "Making manifest file @@ version:%s" (Schema.Version.to_string version));
 	let open KDL in
-	let doc = [
-		node "version" ~args: [arg (`String version)] [];
+	let inputs_node =
 		node "inputs" (
-			Input_foreman.to_manifest (fun s ->
+			Foreman.to_manifest (fun s ->
 				let open Input' in
 					[codec.to_node (to_manifest s)]
 			)
-		);
-	]
+		)
+	in
+	let patches_node =
+		if List.is_empty patches then
+				[]
+		else
+				[node "patches" (List.map Patch.codec.to_node patches)]
+	in
+	let default_hash_algorithm_node =
+		match default_hash_algorithm with
+		| None ->
+			[]
+		| Some dha ->
+			[node "default-hash-algorithm" ~args: [arg (`String (Input.Hash.algorithm_to_string dha))] []]
+	and default_fetch_time_node =
+		match default_fetch_time with
+		| None ->
+			[]
+		| Some dft ->
+			let args = [
+				arg (`String (Input.Fetch_time.to_string dft))
+			]
+			in
+				[node "default-fetch-time" ~args []]
+	and default_gc_node =
+		match default_gc with
+		| None ->
+			[]
+		| Some dgc ->
+			[node "default-gc" ~args: [arg (`String (Input.GC.to_string dgc))] []]
+	in
+	let doc =
+		node "version" ~args: [arg (`String (Schema.Version.to_string version))] [] :: default_hash_algorithm_node @
+		default_fetch_time_node @
+		default_gc_node @
+		inputs_node :: patches_node
 	in
 	Logs.debug (fun m -> m "New KDL doc:@;%a@." KDL.pp doc);
 	manifest := Some doc
+
+(* TODO: unify with `read`, but requries Working_directory to be set, which
+	isn’t yet *)
+let list_names ~fs (section : [< `Inputs | `Patches]) : (string list, Error.t) result =
+	let parent =
+		match section with
+		| `Inputs -> "inputs"
+		| `Patches -> "patches"
+	in
+	let filepath = Eio.Path.(fs / filename) in
+	let manifest_content =
+		Eio.Path.with_open_in ~follow: false filepath @@ fun flow ->
+		let buf = Eio.Buf_read.of_flow flow ~max_size: max_int in
+		Eio.Buf_read.take_all buf
+	in
+	match manifest_content with
+	| content ->
+		begin
+			match KDL.of_string content with
+			| Ok doc ->
+				begin
+					match KDL.L.(doc.@(node parent // children)) with
+					| Ok children ->
+						Ok (List.map (fun ({name; _}: KDL.node) -> name) children)
+					| Error _ -> Ok []
+				end
+			| Error err ->
+				Error (`Manifest (`Parsing [`Parse_error err]))
+		end
+	| exception exn ->
+		Error (`Manifest (`Read_error (Printexc.to_string exn)))
+
+let exists () : bool =
+	let working_dir = Working_directory.get () in
+	let filepath = Eio.Path.(working_dir / filename) in
+	Eio.Path.is_file filepath
+
+let read () =
+	let (let*) = Result.bind in
+	let working_dir = Working_directory.get () in
+	let filepath = Eio.Path.(working_dir / filename) in
+	Logs.info (fun m -> m "Reading manifest @@ %a …" Eio.Path.pp filepath);
+	let* kdl =
+		Eio.Path.with_open_in ~follow: false filepath @@ fun flow ->
+		KDL.of_flow flow
+	in
+	let () = manifest := Some kdl in
+	Ok kdl
 
 let write () : (unit, error) result =
 	let (let*) = Result.bind in
@@ -901,7 +1266,7 @@ let write () : (unit, error) result =
 	in
 	Logs.info (fun m -> m "Writing manifest @@ %s …" filename);
 	let result =
-		Eio.Path.with_open_out ~create: (`Exclusive 0o644) filepath @@ fun flow ->
+		Eio.Path.with_open_out ~follow: false ~create: (`Exclusive 0o644) filepath @@ fun flow ->
 		let banner = [
 			Cstruct.of_string "// ┏┓╻+╻ ╱┏┳┓┏┓┏┳┓┏┓╻\n";
 			Cstruct.of_string "// ┃┃┃┃┗━┓╹┃╹┣┫┃┃┃┣┫┃   Read the manpage:\n";
@@ -914,3 +1279,24 @@ let write () : (unit, error) result =
 	in
 	Logs.info (fun m -> m "Manifest written.");
 	Ok result
+
+let upgrade (content : string) : (string, error) result =
+	let all_lines = String.split_on_char '\n' content in
+	let rec find_index acc = function
+		| [] ->
+			None
+		| line :: rest ->
+			let trimmed = String.trim line in
+			if String.starts_with ~prefix: "version" trimmed then
+				Some (List.rev acc)
+			else
+				find_index (line :: acc) rest
+	in
+	match find_index [] all_lines with
+	| None ->
+		Error `Version_not_found
+	| Some before ->
+		let after = List.tl (List.drop (List.length before) all_lines)
+		and new_line = Fmt.str {|version "%s"|} (Schema.Version.to_string Lazy.(force Schema.Version.latest))
+		in
+		Ok (String.concat "\n" (before @ new_line :: after))

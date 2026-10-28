@@ -1,0 +1,393 @@
+From b8afa8ef1a0388f9e5abdc70b420e5a0531e63fc Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C2=B7=F0=90=91=91=F0=90=91=B4=F0=90=91=95=F0=90=91=91?=
+ =?UTF-8?q?=F0=90=91=A9=F0=90=91=A4?= <toastal@posteo.net>
+Date: Thu, 25 Jun 2026 22:52:31 +0700
+Subject: [PATCH 1/3] --tabs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds indentation character of `\t` or ` `. When --tabs is passed, the
+indentation width is set to 1 for 1 tab. The goal is accessibility as
+tabs can be adjusted downstream by users to suit their needs (Braille
+user may only need 1 width, low vision may need 8, & I find myself
+needing a value beyond 2).
+
+Many programming / scripting languages — including Nix & Bash used in
+stdenv — support both tabs & spaces. Bugs in Nix’s indented strings
+still exist with tabs, but files using only tabs work just fine so long
+as the users isn’t mixing tabs / spaces. However, since so many
+languages support both, this largely is a non-issue.
+---
+ main/Main.hs         |  8 ++++++--
+ src/Nixfmt/Predoc.hs | 21 +++++++++++----------
+ src/Nixfmt/Util.hs   |  7 +++++--
+ 3 files changed, 22 insertions(+), 14 deletions(-)
+
+diff --git a/main/Main.hs b/main/Main.hs
+index 91265a9..905f0d5 100644
+--- a/main/Main.hs
++++ b/main/Main.hs
+@@ -49,6 +49,7 @@ data Nixfmt = Nixfmt
+   { files :: [FilePath],
+     width :: Width,
+     indent :: Int,
++    tabs :: Bool,
+     check :: Bool,
+     followSymlinks :: Bool,
+     mergetool :: Bool,
+@@ -76,6 +77,7 @@ options =
+            defaultWidth
+              &= help (addDefaultHint defaultWidth "Maximum width in characters"),
+          indent = defaultIndent &= help (addDefaultHint defaultIndent "Number of spaces to use for indentation"),
++         tabs = False &= help "Use tabs for indentation instead of spaces (WARNING: NixCpp has gotchas with indented string syntax — especially if trying to mix tabs & spaces)",
+          check = False &= help "Check whether files are formatted without modifying them",
+          followSymlinks =
+            False
+@@ -198,8 +200,10 @@ type Formatter = FilePath -> Text -> Either String Text
+ toFormatter :: Nixfmt -> Formatter
+ toFormatter Nixfmt{ast = True} = Nixfmt.printAst
+ toFormatter Nixfmt{ir = True} = Nixfmt.printIR
+-toFormatter Nixfmt{width, indent, verify = True, strict} = Nixfmt.formatVerify (layout width indent strict)
+-toFormatter Nixfmt{width, indent, verify = False, strict} = Nixfmt.format (layout width indent strict)
++toFormatter Nixfmt{width, indent, tabs, verify = True, strict} =
++  Nixfmt.formatVerify (layout width (if tabs then 1 else indent) (if tabs then '\t' else ' ') strict)
++toFormatter Nixfmt{width, indent, tabs, verify = False, strict} =
++  Nixfmt.format (layout width (if tabs then 1 else indent) (if tabs then '\t' else ' ') strict)
+ 
+ type Operation = Formatter -> Target -> IO Result
+ 
+diff --git a/src/Nixfmt/Predoc.hs b/src/Nixfmt/Predoc.hs
+index b6754dc..4b44a2f 100644
+--- a/src/Nixfmt/Predoc.hs
++++ b/src/Nixfmt/Predoc.hs
+@@ -44,11 +44,11 @@ import Data.Function ((&))
+ import Data.Functor (($>), (<&>))
+ import Data.Functor.Identity (runIdentity)
+ import Data.List (intersperse)
+-import Data.List.NonEmpty (NonEmpty (..), singleton, (<|))
++import Data.List.NonEmpty (NonEmpty (..), (<|))
+ import Data.List.NonEmpty qualified as NonEmpty
+ import Data.Maybe (fromMaybe)
+ import Data.Sequence qualified as Seq
+-import Data.Text as Text (Text, concat, length, replicate, strip, stripStart, takeWhileEnd)
++import Data.Text as Text (Text, concat, length, replicate, singleton, strip, stripStart, takeWhileEnd)
+ import GHC.Stack (HasCallStack)
+ import Nixfmt.Types (
+   Ann (..),
+@@ -418,8 +418,8 @@ mergeSpacings Hardspace (Newlines x) = Newlines x
+ mergeSpacings _ (Newlines x) = Newlines (x + 1)
+ mergeSpacings _ y = y
+ 
+-layout :: (Pretty a, LanguageElement a) => Int -> Int -> Bool -> a -> Text
+-layout width indentWidth strict a = finalize $ layoutGreedy width indentWidth doc
++layout :: (Pretty a, LanguageElement a) => Int -> Int -> Char -> Bool -> a -> Text
++layout width indentWidth indentChar strict a = finalize $ layoutGreedy width indentWidth indentChar doc
+   where
+     doc =
+       fixup
+@@ -565,9 +565,9 @@ nextIndent _ = (0, 0)
+ newlines :: Int -> Text
+ newlines n = Text.replicate n "\n"
+ 
+--- | Create `n` spaces
+-indent :: Int -> Text
+-indent n = Text.replicate n " "
++-- | Create `n` indention characters
++indent :: Char -> Int -> Text
++indent c n = Text.replicate n (Text.singleton c)
+ 
+ -- All state is (cc, indents, suppress)
+ -- cc: current column (within the current line, *not including indentation*)
+@@ -580,8 +580,9 @@ indent n = Text.replicate n " "
+ type St = (Int, NonEmpty (Int, Int), Bool)
+ 
+ -- tw   Target Width
+-layoutGreedy :: Int -> Int -> Doc -> Text
+-layoutGreedy tw iw doc = Text.concat $ evalState (go [Group RegularG doc] []) (0, singleton (0, 0), False)
++layoutGreedy :: Int -> Int -> Char -> Doc -> Text
++layoutGreedy tw iw ic doc =
++  Text.concat $ evalState (go [Group RegularG doc] []) (0, NonEmpty.singleton (0, 0), False)
+   where
+     -- Simple helpers around `put` with a tuple state
+     -- NOTE: making putL strict removes the allocation for the Int
+@@ -621,7 +622,7 @@ layoutGreedy tw iw doc = Text.concat $ evalState (go [Group RegularG doc] []) (0
+         go' = do
+           (cc, (ci, _) :| _, _) <- get
+           putL (if withIndent then cc + textWidth t else max 1 (cc + textWidth t))
+-          let !i'd = indent (ci + textOffset)
++          let !i'd = indent ic (ci + textOffset)
+           emit $! if cc == 0 && withIndent then [i'd, t] else [t]
+ 
+     -- Simply put text without caring about line-start indentation
+diff --git a/src/Nixfmt/Util.hs b/src/Nixfmt/Util.hs
+index c2ae182..bc53845 100644
+--- a/src/Nixfmt/Util.hs
++++ b/src/Nixfmt/Util.hs
+@@ -69,12 +69,15 @@ commonPrefix a b =
+     Nothing -> empty
+     Just (prefix, _, _) -> prefix
+ 
++isIndentChar :: Char -> Bool
++isIndentChar c = c == ' ' || c == '\t'
++
+ -- | The longest common prefix consisting of only whitespace. The longest common
+ -- prefix of zero texts is infinite, represented as Nothing.
+ commonIndentation :: [Text] -> Maybe Text
+ commonIndentation [] = Nothing
+-commonIndentation [x] = Just $ Text.takeWhile (== ' ') x
++commonIndentation [x] = Just $ Text.takeWhile isIndentChar x
+ commonIndentation (x : y : xs) = commonIndentation (commonPrefix x y : xs)
+ 
+ isSpaces :: Text -> Bool
+-isSpaces = Text.all (== ' ')
++isSpaces = Text.all isIndentChar
+-- 
+2.55.0
+
+
+From 6536c97f12b918bf0ccb39ca8b871e9cc5590cbe Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C2=B7=F0=90=91=91=F0=90=91=B4=F0=90=91=95=F0=90=91=91?=
+ =?UTF-8?q?=F0=90=91=A9=F0=90=91=A4?= <toastal@posteo.net>
+Date: Sun, 12 Jul 2026 01:58:46 +0700
+Subject: [PATCH 2/3] encode Indentation invariant into an ADT
+
+---
+ main/Main.hs         | 23 +++++++++++++++++------
+ src/Nixfmt/Predoc.hs | 14 ++++++++++----
+ src/Nixfmt/Types.hs  | 18 ++++++++++++++++++
+ 3 files changed, 45 insertions(+), 10 deletions(-)
+
+diff --git a/main/Main.hs b/main/Main.hs
+index 905f0d5..defc3d5 100644
+--- a/main/Main.hs
++++ b/main/Main.hs
+@@ -12,13 +12,14 @@ import Data.ByteString.Char8 (unpack)
+ import Data.Either (lefts)
+ import Data.FileEmbed
+ import Data.List (intersperse, isSuffixOf)
+-import Data.Maybe (fromMaybe)
++import Data.Maybe (fromMaybe, isJust)
+ import Data.Text (Text)
+ import Data.Text.IO qualified as TextIO (getContents, hPutStr, putStr)
+ import Data.Version (showVersion)
+ import GHC.IO.Encoding (utf8)
+ import Nixfmt qualified
+ import Nixfmt.Predoc (layout)
++import Nixfmt.Types (Indentation (..))
+ import Paths_nixfmt (version)
+ import System.Console.CmdArgs (
+   Data,
+@@ -41,6 +42,9 @@ import System.Posix.Process (exitImmediately)
+ import System.Posix.Signals (Handler (..), installHandler, keyboardSignal)
+ import System.Process (callProcess)
+ 
++defaultIndent :: Int
++defaultIndent = 2
++
+ type Result = Either String ()
+ 
+ type Width = Int
+@@ -48,7 +52,7 @@ type Width = Int
+ data Nixfmt = Nixfmt
+   { files :: [FilePath],
+     width :: Width,
+-    indent :: Int,
++    indent :: Maybe Int,
+     tabs :: Bool,
+     check :: Bool,
+     followSymlinks :: Bool,
+@@ -68,7 +72,6 @@ versionFromFile = maybe (showVersion version) unpack $(embedFileIfExists ".versi
+ options :: Nixfmt
+ options =
+   let defaultWidth = 100
+-      defaultIndent = 2
+       addDefaultHint value message =
+         message ++ "\n[default: " ++ show value ++ "]"
+   in Nixfmt
+@@ -76,7 +79,7 @@ options =
+          width =
+            defaultWidth
+              &= help (addDefaultHint defaultWidth "Maximum width in characters"),
+-         indent = defaultIndent &= help (addDefaultHint defaultIndent "Number of spaces to use for indentation"),
++         indent = Nothing &= typ "INT" &= help (addDefaultHint defaultIndent "Number of spaces to use for indentation"),
+          tabs = False &= help "Use tabs for indentation instead of spaces (WARNING: NixCpp has gotchas with indented string syntax — especially if trying to mix tabs & spaces)",
+          check = False &= help "Check whether files are formatted without modifying them",
+          followSymlinks =
+@@ -195,15 +198,21 @@ toTargets Nixfmt{files = ["-"], filename} = pure [stdioTarget filename]
+ toTargets opts@Nixfmt{check = False, files = paths} = map (fileTarget opts) <$> collectAllNixFiles paths
+ toTargets Nixfmt{check = True, files = paths} = map checkFileTarget <$> collectAllNixFiles paths
+ 
++indentation :: Maybe Int -> Bool -> Indentation
++indentation Nothing False = Spaces defaultIndent
++indentation (Just iw) False = Spaces iw
++indentation Nothing True = Tabs
++indentation (Just _) True = error "Must be spaces or tabs" -- should be handled my main
++
+ type Formatter = FilePath -> Text -> Either String Text
+ 
+ toFormatter :: Nixfmt -> Formatter
+ toFormatter Nixfmt{ast = True} = Nixfmt.printAst
+ toFormatter Nixfmt{ir = True} = Nixfmt.printIR
+ toFormatter Nixfmt{width, indent, tabs, verify = True, strict} =
+-  Nixfmt.formatVerify (layout width (if tabs then 1 else indent) (if tabs then '\t' else ' ') strict)
++  Nixfmt.formatVerify (layout width (indentation indent tabs) strict)
+ toFormatter Nixfmt{width, indent, tabs, verify = False, strict} =
+-  Nixfmt.format (layout width (if tabs then 1 else indent) (if tabs then '\t' else ' ') strict)
++  Nixfmt.format (layout width (indentation indent tabs) strict)
+ 
+ type Operation = Formatter -> Target -> IO Result
+ 
+@@ -276,6 +285,8 @@ main = withUtf8StdHandles $ do
+       (Catch (exitImmediately $ ExitFailure 2))
+       Nothing
+   opts <- cmdArgs options
++  when (tabs opts && isJust (indent opts)) $
++    ioError (userError "--tabs & --indent are mutually exclusive")
+   results <- runJobs (toWriteError opts) =<< toJobs opts
+   case lefts results of
+     [] -> exitSuccess
+diff --git a/src/Nixfmt/Predoc.hs b/src/Nixfmt/Predoc.hs
+index 4b44a2f..688d6ec 100644
+--- a/src/Nixfmt/Predoc.hs
++++ b/src/Nixfmt/Predoc.hs
+@@ -52,8 +52,11 @@ import Data.Text as Text (Text, concat, length, replicate, singleton, strip, str
+ import GHC.Stack (HasCallStack)
+ import Nixfmt.Types (
+   Ann (..),
++  Indentation (..),
+   LanguageElement,
+   Trivium (..),
++  indentChar,
++  indentWidth,
+   mapAllTokens,
+   mapFirstToken,
+   removeLineInfo,
+@@ -418,8 +421,8 @@ mergeSpacings Hardspace (Newlines x) = Newlines x
+ mergeSpacings _ (Newlines x) = Newlines (x + 1)
+ mergeSpacings _ y = y
+ 
+-layout :: (Pretty a, LanguageElement a) => Int -> Int -> Char -> Bool -> a -> Text
+-layout width indentWidth indentChar strict a = finalize $ layoutGreedy width indentWidth indentChar doc
++layout :: (Pretty a, LanguageElement a) => Int -> Indentation -> Bool -> a -> Text
++layout width indentation strict a = finalize $ layoutGreedy width indentation doc
+   where
+     doc =
+       fixup
+@@ -580,10 +583,13 @@ indent c n = Text.replicate n (Text.singleton c)
+ type St = (Int, NonEmpty (Int, Int), Bool)
+ 
+ -- tw   Target Width
+-layoutGreedy :: Int -> Int -> Char -> Doc -> Text
+-layoutGreedy tw iw ic doc =
++layoutGreedy :: Int -> Indentation -> Doc -> Text
++layoutGreedy tw indentation doc =
+   Text.concat $ evalState (go [Group RegularG doc] []) (0, NonEmpty.singleton (0, 0), False)
+   where
++    iw = indentWidth indentation
++    ic = indentChar indentation
++
+     -- Simple helpers around `put` with a tuple state
+     -- NOTE: making putL strict removes the allocation for the Int
+     putL v = modify' (\(_, indents, suppress) -> (v, indents, suppress))
+diff --git a/src/Nixfmt/Types.hs b/src/Nixfmt/Types.hs
+index a87b4da..ba08a78 100644
+--- a/src/Nixfmt/Types.hs
++++ b/src/Nixfmt/Types.hs
+@@ -29,6 +29,9 @@ module Nixfmt.Types (
+   Token (..),
+   Whole (..),
+   TrailingComment (..),
++  Indentation (..),
++  indentWidth,
++  indentChar,
+   Trivium (..),
+   removeLineInfo,
+   hasTrivia,
+@@ -113,6 +116,21 @@ type Trivia = Seq Trivium
+ 
+ newtype TrailingComment = TrailingComment Text deriving (Eq, Show)
+ 
++data Indentation
++  = Spaces Int
++  | Tabs
++  deriving (Show, Eq)
++
++indentWidth :: Indentation -> Int
++indentWidth = \case
++  Spaces n -> n
++  Tabs -> 1
++
++indentChar :: Indentation -> Char
++indentChar = \case
++  Spaces _ -> ' '
++  Tabs -> '\t'
++
+ data Ann a = Ann
+   { preTrivia :: Trivia,
+     -- | The line of this value in the source code
+-- 
+2.55.0
+
+
+From 09c67f8156241f5dac1586d7feba6ea861b9b1fd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C2=B7=F0=90=91=91=F0=90=91=B4=F0=90=91=95=F0=90=91=91?=
+ =?UTF-8?q?=F0=90=91=A9=F0=90=91=A4?= <toastal@posteo.net>
+Date: Sat, 11 Jul 2026 19:34:18 +0700
+Subject: [PATCH 3/3] add tab tests
+
+---
+ test/correct-tab-indented.nix | 12 ++++++++++++
+ test/correct-tab.nix          |  6 ++++++
+ test/test.sh                  |  3 +++
+ 3 files changed, 21 insertions(+)
+ create mode 100644 test/correct-tab-indented.nix
+ create mode 100644 test/correct-tab.nix
+
+diff --git a/test/correct-tab-indented.nix b/test/correct-tab-indented.nix
+new file mode 100644
+index 0000000..4487b73
+--- /dev/null
++++ b/test/correct-tab-indented.nix
+@@ -0,0 +1,12 @@
++let
++	Where-are-you = "& I’m so sorry";
++in
++[
++	/* sh */ ''
++		${Where-are-you}?
++		for action in "sleep" "dream"; do
++			echo "I cannot $action"
++		done
++	''
++	"tonight"
++]
+diff --git a/test/correct-tab.nix b/test/correct-tab.nix
+new file mode 100644
+index 0000000..544336e
+--- /dev/null
++++ b/test/correct-tab.nix
+@@ -0,0 +1,6 @@
++{
++	foo = {
++		bar = 1;
++		baz = null;
++	};
++}
+diff --git a/test/test.sh b/test/test.sh
+index 02105b2..1ea3a18 100755
+--- a/test/test.sh
++++ b/test/test.sh
+@@ -58,6 +58,9 @@ done
+ 
+ verifyCorrect test/correct-indent-4.nix --indent=4
+ 
++verifyCorrect test/correct-tab.nix --tabs
++verifyCorrect test/correct-tab-indented.nix --tabs
++
+ # Verify "invalid"
+ for file in test/invalid/*.nix; do
+   if nixfmt - < "$file" > /dev/null 2>&1; then
+-- 
+2.55.0
+

@@ -1,25 +1,24 @@
 // ┏┓╻+╻ ╱┏┳┓┏┓┏┳┓┏┓╻
 // ┃┃┃┃┗━┓╹┃╹┣┫┃┃┃┣┫┃   Read the manpage:
 // ╹┗┛╹╱ ╹ ╹ ╹╹╹ ╹╹╹┗┛  $ man nixtamal-manifest
-version "0.1.1"
+version "1.5.0"
+default-gc track
 inputs {
 	nixpkgs {
 		archive {
-			url "https://github.com/NixOS/nixpkgs/archive/{{cmd_value}}.tar.gz"
+			url "{{fresh_value}}/nixexprs.tar.zst"
 		}
-		hash algorithm=SHA256
-		latest-cmd {
-			$ git ls-remote "https://github.com/NixOS/nixpkgs.git" --branches nixpkgs-unstable
-			| cut -f1
+		hash algorithm=SHA-256
+		fresh-cmd {
+			$ curl -Ls --http2 --compressed -o "/dev/null" -w "%{url_effective}" "https://channels.nixos.org/nixpkgs-unstable"
 		}
 	}
 	dash-nix {
 		darcs {
 			repository "https://darcs.toastal.in.th/dash-nix"
-			mirrors "https://smeder.ee/~toastal/dash-nix.darcs"
-			"https://hub.darcs.net/toastal/darcs-nix"
+			mirrors "https://smeder.ee/~toastal/dash-nix.darcs" "https://hub.darcs.net/toastal/darcs-nix"
 		}
-		latest-cmd {
+		fresh-cmd {
 			$ curl -fsL "https://darcs.toastal.in.th/dash-nix/_darcs/weak_hash"
 		}
 	}
